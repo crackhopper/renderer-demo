@@ -4,6 +4,7 @@
     "cmake.configureOnOpen": false,
     "cmake.configureArgs": [],
     "cmake.buildArgs": [],
+    "files.encoding": "utf8bom",
     "files.associations": {
       "algorithm": "cpp",
       "array": "cpp",
