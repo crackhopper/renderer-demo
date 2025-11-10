@@ -1,0 +1,25 @@
+# Build output
+build/
+
+# External: ignore docs, examples, tests
+external/**/docs/
+external/**/examples/
+external/**/tests/
+
+# CMake files (optional)
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+
+# OS/IDE files
+*.exe
+*.dll
+*.pdb
+*.obj
+*.lib
+*.idb
+*.suo
+*.user
+*.VC.db
+.DS_Store
