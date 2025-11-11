@@ -2,6 +2,8 @@
     "version": "0.2.0",
     "configurations": [
         {
+            // cmake扩展自动编译了，不需要配置task专门编译。
+            // 默认的扩展配置有: "cmake.buildBeforeRun": true
             "name": "Debug",
             "type": "cppvsdbg",
             "request": "launch",
@@ -10,7 +12,6 @@
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
-            "preLaunchTask": "CMake: Build Debug"
         }
     ]
 }

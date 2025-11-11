@@ -23,3 +23,5 @@ Makefile
 *.user
 *.VC.db
 .DS_Store
+
+*.log
