@@ -1225,6 +1225,12 @@ private:
     submitInfo.pSignalSemaphores = signalSemaphores;
 
     // 这里是，当command buffer执行完后，signal下面的semaphore
+    // 注意，提交结束就释放了fence，这导致 presentQueue 可能还在使用
+    // renderFinishedSemaphore 的时候就进入了下一帧渲染，从而触发了
+    // renderFinishedSemaphore
+    // 的使用。但validator无法判断这么细的逻辑，只看到两个队列使用semaphone于是报错。
+    // 这里有个讨论帖子： https://www.reddit.com/r/vulkan/comments/1me8ubj/vulkan_validation_error/
+    // 最好做法还是，直接每个swap chain image具备一套信号量。
     if (vkQueueSubmit(graphicsQueue, 1, &submitInfo, inFlightFence) !=
         VK_SUCCESS) {
       throw std::runtime_error("failed to submit draw command buffer!");
@@ -1247,7 +1253,6 @@ private:
 
     // 呈现 swap chain 中的 image
     vkQueuePresentKHR(presentQueue, &presentInfo);
-
   }
 
   void cleanup() {
