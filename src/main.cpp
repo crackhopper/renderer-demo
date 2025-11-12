@@ -12,7 +12,6 @@
 #include <optional>
 #include <set>
 #include <stdexcept>
-#include <thread>
 #include <unordered_set>
 #include <vector>
 
@@ -53,41 +52,21 @@ void printCurrentDirectory_cpp17() {
   }
 }
 
-// 控制app的运行状态的变量
-std::atomic<bool> running = true;
-std::atomic<bool> framebufferResized = false;
-std::chrono::time_point<std::chrono::high_resolution_clock> lastResizeTime =
-    std::chrono::high_resolution_clock::now();
-
 class HelloTriangleApplication {
-  std::thread renderThread;
-
 public:
   void run() {
     initWindow();
     initVulkan();
-    renderThread = std::thread([this]() { mainLoop(); });
-
-    // 主线程事件循环
-    while (!glfwWindowShouldClose(window)) {
-      glfwPollEvents();
-    }
-    running = false;
-    renderThread.join();
-    vkDeviceWaitIdle(device);
-
+    mainLoop();
     cleanup();
   }
-
-  inline void recreateSwapChain() { _recreateSwapChain(); }
-  inline void drawFrame() { _drawFrame(); }
 
 private:
   GLFWwindow *window;
   const uint32_t WIDTH = 800;
   const uint32_t HEIGHT = 600;
 
-  int framesInFlight = 2; // we need change it to swap chain size
+  int MAX_FRAMES_IN_FLIGHT = 2;
 
   const std::vector<const char *> validationLayers = {
       "VK_LAYER_KHRONOS_validation"};
@@ -792,9 +771,9 @@ private:
     glfwInit();
 
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
-    window = glfwCreateWindow(WIDTH, HEIGHT, "Vulkan", nullptr, nullptr);
+    // glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
 
+    window = glfwCreateWindow(WIDTH, HEIGHT, "Vulkan", nullptr, nullptr);
     glfwSetWindowUserPointer(window, this);
     glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
   }
@@ -803,8 +782,7 @@ private:
                                         int height) {
     auto app = reinterpret_cast<HelloTriangleApplication *>(
         glfwGetWindowUserPointer(window));
-    framebufferResized = true;
-    lastResizeTime = std::chrono::high_resolution_clock::now();
+    app->framebufferResized = true;
   }
 
   void initVulkan() {
@@ -822,10 +800,17 @@ private:
     createCommandBuffers();
     createSyncObjects();
   }
+  void cleanupSyncObjects() {
+    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+      vkDestroySemaphore(device, renderFinishedSemaphores[i], nullptr);
+      vkDestroySemaphore(device, imageAvailableSemaphores[i], nullptr);
+      vkDestroyFence(device, inFlightFences[i], nullptr);
+    }
+  }
   void createSyncObjects() {
-    imageAvailableSemaphores.resize(framesInFlight);
-    renderFinishedSemaphores.resize(framesInFlight);
-    inFlightFences.resize(framesInFlight);
+    imageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
+    renderFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
+    inFlightFences.resize(MAX_FRAMES_IN_FLIGHT);
 
     // 信号量用于同步渲染操作和 CPU 操作。
     // 信号量可以在命令缓冲区中使用 waitSemaphore 指令等待，
@@ -844,7 +829,7 @@ private:
     fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
     fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT; //! 防止第一帧开始就阻塞了！
 
-    for (size_t i = 0; i < framesInFlight; i++) {
+    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
       if (vkCreateSemaphore(device, &semaphoreInfo, nullptr,
                             &imageAvailableSemaphores[i]) != VK_SUCCESS ||
           vkCreateSemaphore(device, &semaphoreInfo, nullptr,
@@ -911,8 +896,7 @@ private:
     vkDestroySwapchainKHR(device, swapChain, nullptr);
   }
 
-  void _recreateSwapChain() {
-    // 获取窗口大小；如果是0，说明窗口minimize了。等待，不做任何操作。（阻塞）
+  void recreateSwapChain() {
     int width = 0, height = 0;
     glfwGetFramebufferSize(window, &width, &height);
     while (width == 0 || height == 0) {
@@ -923,21 +907,13 @@ private:
     vkDeviceWaitIdle(device);
 
     cleanupSwapChain();
+    cleanupSyncObjects();
 
     createSwapChain();
     createImageViews();
     createFramebuffers();
 
-    cleanupSyncObjects();
     createSyncObjects();
-  }
-
-  void cleanupSyncObjects() {
-    for (size_t i = 0; i < framesInFlight; i++) {
-      vkDestroySemaphore(device, renderFinishedSemaphores[i], nullptr);
-      vkDestroySemaphore(device, imageAvailableSemaphores[i], nullptr);
-      vkDestroyFence(device, inFlightFences[i], nullptr);
-    }
   }
 
   void createSwapChain() {
@@ -1010,7 +986,7 @@ private:
     vkGetSwapchainImagesKHR(device, swapChain, &imageCount,
                             swapChainImages.data());
 
-    framesInFlight = imageCount;
+    MAX_FRAMES_IN_FLIGHT = imageCount;
 
     swapChainImageFormat = surfaceFormat.format;
     swapChainExtent = extent;
@@ -1257,37 +1233,13 @@ private:
     return indices;
   }
 
-  int fps = 60;
   void mainLoop() {
-    using clock = std::chrono::high_resolution_clock;
-    auto lastTime = clock::now();
-    while (running) {
-      // 处理resize
-      if (framebufferResized) {
-        auto now = clock::now();
-        auto elapsed =
-            duration_cast<std::chrono::milliseconds>(now - lastResizeTime)
-                .count();
-        if (elapsed > 50) { // 50ms内没有新resize事件
-          vkDeviceWaitIdle(device);
-          recreateSwapChain();
-          framebufferResized = false;
-        }
-      }
-
+    while (!glfwWindowShouldClose(window)) {
+      glfwPollEvents();
       drawFrame();
-      // 控制帧率，比如60FPS
-      auto now = clock::now();
-      auto frameTime =
-          std::chrono::duration_cast<std::chrono::milliseconds>(now - lastTime)
-              .count();
-      int frameTimeMax = 1000 / fps;
-      if (frameTime < frameTimeMax) { // 16ms ~= 60fps
-        std::this_thread::sleep_for(
-            std::chrono::milliseconds(frameTimeMax - frameTime));
-      }
-      lastTime = now;
     }
+
+    // 等待所有队列完成。防止资源占用中被释放导致的问题。
     vkDeviceWaitIdle(device);
   }
 
@@ -1295,18 +1247,17 @@ private:
   std::vector<VkSemaphore> renderFinishedSemaphores;
   std::vector<VkFence> inFlightFences;
 
+  bool framebufferResized = false;
+
   uint32_t currentFrame = 0;
 
-  void _drawFrame() {
-    if (!running) {
-      return;
-    }
+  void drawFrame() {
     // 等待上一帧完成（注意，第一帧还没画的时候，会直接阻塞死，因此要在
     // createSyncObject 即初始化位置处理一下）
     vkWaitForFences(device, 1, &inFlightFences[currentFrame], VK_TRUE,
                     UINT64_MAX);
 
-    // 获取接下来渲染的image索引。有可能获取失败，就需要重新创建交换链了。
+    // 获取接下来渲染的image索引
     uint32_t imageIndex;
     VkResult result = vkAcquireNextImageKHR(
         device, swapChain, UINT64_MAX, imageAvailableSemaphores[currentFrame],
@@ -1321,7 +1272,6 @@ private:
       throw std::runtime_error("failed to acquire swap chain image!");
     }
 
-    // 开始绘制前！
     // 重置fence，让其继续生效（可以下一帧阻塞主线程）。应该立马调用，因为后面的渲染还会用到它。
     vkResetFences(device, 1, &inFlightFences[currentFrame]);
 
@@ -1383,17 +1333,24 @@ private:
     // 呈现 swap chain 中的 image
     vkQueuePresentKHR(presentQueue, &presentInfo);
 
-    currentFrame = (currentFrame + 1) % framesInFlight;
+    currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
   }
 
   void cleanup() {
     cleanupSwapChain();
-    cleanupSyncObjects();
 
-    vkDestroyCommandPool(device, commandPool, nullptr);
     vkDestroyPipeline(device, graphicsPipeline, nullptr);
     vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
+
     vkDestroyRenderPass(device, renderPass, nullptr);
+
+    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+      vkDestroySemaphore(device, renderFinishedSemaphores[i], nullptr);
+      vkDestroySemaphore(device, imageAvailableSemaphores[i], nullptr);
+      vkDestroyFence(device, inFlightFences[i], nullptr);
+    }
+
+    vkDestroyCommandPool(device, commandPool, nullptr);
 
     vkDestroyDevice(device, nullptr);
 
@@ -1405,6 +1362,7 @@ private:
     vkDestroyInstance(instance, nullptr);
 
     glfwDestroyWindow(window);
+
     glfwTerminate();
   }
 };
