@@ -95,6 +95,11 @@
     "chrono": "cpp",
     "*.rh": "cpp",
     "unordered_set": "cpp",
-    "fstream": "cpp"
+    "fstream": "cpp",
+    "filesystem": "cpp",
+    "forward_list": "cpp",
+    "ratio": "cpp",
+    "thread": "cpp",
+    "stop_token": "cpp"
   }
 }

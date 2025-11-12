@@ -12,6 +12,7 @@
 #include <optional>
 #include <set>
 #include <stdexcept>
+#include <thread>
 #include <unordered_set>
 #include <vector>
 
@@ -52,19 +53,41 @@ void printCurrentDirectory_cpp17() {
   }
 }
 
+// 控制app的运行状态的变量
+std::atomic<bool> running = true;
+std::atomic<bool> framebufferResized = false;
+std::chrono::time_point<std::chrono::high_resolution_clock> lastResizeTime =
+    std::chrono::high_resolution_clock::now();
+
 class HelloTriangleApplication {
+  std::thread renderThread;
+
 public:
   void run() {
     initWindow();
     initVulkan();
-    mainLoop();
+    renderThread = std::thread([this]() { mainLoop(); });
+
+    // 主线程事件循环
+    while (!glfwWindowShouldClose(window)) {
+      glfwPollEvents();
+    }
+    running = false;
+    renderThread.join();
+    vkDeviceWaitIdle(device);
+
     cleanup();
   }
+
+  inline void recreateSwapChain() { _recreateSwapChain(); }
+  inline void drawFrame() { _drawFrame(); }
 
 private:
   GLFWwindow *window;
   const uint32_t WIDTH = 800;
   const uint32_t HEIGHT = 600;
+
+  int framesInFlight = 2; // we need change it to swap chain size
 
   const std::vector<const char *> validationLayers = {
       "VK_LAYER_KHRONOS_validation"};
@@ -107,7 +130,7 @@ private:
 
   std::vector<VkFramebuffer> swapChainFramebuffers;
   VkCommandPool commandPool;
-  VkCommandBuffer commandBuffer;
+  std::vector<VkCommandBuffer> commandBuffers;
 
   void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
     /*************** 指令录制开始 */
@@ -169,14 +192,16 @@ private:
     /*************** 指令录制结束 */
   }
 
-  void createCommandBuffer() {
+  void createCommandBuffers() {
+    commandBuffers.resize(swapChainImageViews.size());
+
     VkCommandBufferAllocateInfo allocInfo{};
     allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     allocInfo.commandPool = commandPool;
     allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocInfo.commandBufferCount = 1;
+    allocInfo.commandBufferCount = (uint32_t)commandBuffers.size();
 
-    if (vkAllocateCommandBuffers(device, &allocInfo, &commandBuffer) !=
+    if (vkAllocateCommandBuffers(device, &allocInfo, commandBuffers.data()) !=
         VK_SUCCESS) {
       throw std::runtime_error("failed to allocate command buffers!");
     }
@@ -767,9 +792,21 @@ private:
     glfwInit();
 
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+    glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
     window = glfwCreateWindow(WIDTH, HEIGHT, "Vulkan", nullptr, nullptr);
+
+    glfwSetWindowUserPointer(window, this);
+    glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
   }
+
+  static void framebufferResizeCallback(GLFWwindow *window, int width,
+                                        int height) {
+    auto app = reinterpret_cast<HelloTriangleApplication *>(
+        glfwGetWindowUserPointer(window));
+    framebufferResized = true;
+    lastResizeTime = std::chrono::high_resolution_clock::now();
+  }
+
   void initVulkan() {
     createInstance();
     setupDebugMessenger();
@@ -782,10 +819,14 @@ private:
     createGraphicsPipeline();
     createFramebuffers();
     createCommandPool();
-    createCommandBuffer();
+    createCommandBuffers();
     createSyncObjects();
   }
   void createSyncObjects() {
+    imageAvailableSemaphores.resize(framesInFlight);
+    renderFinishedSemaphores.resize(framesInFlight);
+    inFlightFences.resize(framesInFlight);
+
     // 信号量用于同步渲染操作和 CPU 操作。
     // 信号量可以在命令缓冲区中使用 waitSemaphore 指令等待，
     // 并在渲染完成后使用 signalSemaphore 指令通知。
@@ -803,13 +844,15 @@ private:
     fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
     fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT; //! 防止第一帧开始就阻塞了！
 
-    if (vkCreateSemaphore(device, &semaphoreInfo, nullptr,
-                          &imageAvailableSemaphore) != VK_SUCCESS ||
-        vkCreateSemaphore(device, &semaphoreInfo, nullptr,
-                          &renderFinishedSemaphore) != VK_SUCCESS ||
-        vkCreateFence(device, &fenceInfo, nullptr, &inFlightFence) !=
-            VK_SUCCESS) {
-      throw std::runtime_error("failed to create semaphores!");
+    for (size_t i = 0; i < framesInFlight; i++) {
+      if (vkCreateSemaphore(device, &semaphoreInfo, nullptr,
+                            &imageAvailableSemaphores[i]) != VK_SUCCESS ||
+          vkCreateSemaphore(device, &semaphoreInfo, nullptr,
+                            &renderFinishedSemaphores[i]) != VK_SUCCESS ||
+          vkCreateFence(device, &fenceInfo, nullptr, &inFlightFences[i]) !=
+              VK_SUCCESS) {
+        throw std::runtime_error("failed to create semaphores!");
+      }
     }
   }
 
@@ -853,6 +896,47 @@ private:
                             &swapChainImageViews[i]) != VK_SUCCESS) {
         throw std::runtime_error("failed to create image views!");
       }
+    }
+  }
+
+  void cleanupSwapChain() {
+    for (auto framebuffer : swapChainFramebuffers) {
+      vkDestroyFramebuffer(device, framebuffer, nullptr);
+    }
+
+    for (auto imageView : swapChainImageViews) {
+      vkDestroyImageView(device, imageView, nullptr);
+    }
+
+    vkDestroySwapchainKHR(device, swapChain, nullptr);
+  }
+
+  void _recreateSwapChain() {
+    // 获取窗口大小；如果是0，说明窗口minimize了。等待，不做任何操作。（阻塞）
+    int width = 0, height = 0;
+    glfwGetFramebufferSize(window, &width, &height);
+    while (width == 0 || height == 0) {
+      glfwGetFramebufferSize(window, &width, &height);
+      glfwWaitEvents();
+    }
+
+    vkDeviceWaitIdle(device);
+
+    cleanupSwapChain();
+
+    createSwapChain();
+    createImageViews();
+    createFramebuffers();
+
+    cleanupSyncObjects();
+    createSyncObjects();
+  }
+
+  void cleanupSyncObjects() {
+    for (size_t i = 0; i < framesInFlight; i++) {
+      vkDestroySemaphore(device, renderFinishedSemaphores[i], nullptr);
+      vkDestroySemaphore(device, imageAvailableSemaphores[i], nullptr);
+      vkDestroyFence(device, inFlightFences[i], nullptr);
     }
   }
 
@@ -925,6 +1009,8 @@ private:
     swapChainImages.resize(imageCount);
     vkGetSwapchainImagesKHR(device, swapChain, &imageCount,
                             swapChainImages.data());
+
+    framesInFlight = imageCount;
 
     swapChainImageFormat = surfaceFormat.format;
     swapChainExtent = extent;
@@ -1171,42 +1257,84 @@ private:
     return indices;
   }
 
+  int fps = 60;
   void mainLoop() {
-    while (!glfwWindowShouldClose(window)) {
-      glfwPollEvents();
-      drawFrame();
-    }
+    using clock = std::chrono::high_resolution_clock;
+    auto lastTime = clock::now();
+    while (running) {
+      // 处理resize
+      if (framebufferResized) {
+        auto now = clock::now();
+        auto elapsed =
+            duration_cast<std::chrono::milliseconds>(now - lastResizeTime)
+                .count();
+        if (elapsed > 50) { // 50ms内没有新resize事件
+          vkDeviceWaitIdle(device);
+          recreateSwapChain();
+          framebufferResized = false;
+        }
+      }
 
-    // 等待所有队列完成。防止资源占用中被释放导致的问题。
+      drawFrame();
+      // 控制帧率，比如60FPS
+      auto now = clock::now();
+      auto frameTime =
+          std::chrono::duration_cast<std::chrono::milliseconds>(now - lastTime)
+              .count();
+      int frameTimeMax = 1000 / fps;
+      if (frameTime < frameTimeMax) { // 16ms ~= 60fps
+        std::this_thread::sleep_for(
+            std::chrono::milliseconds(frameTimeMax - frameTime));
+      }
+      lastTime = now;
+    }
     vkDeviceWaitIdle(device);
   }
 
-  VkSemaphore imageAvailableSemaphore;
-  VkSemaphore renderFinishedSemaphore;
-  VkFence inFlightFence;
-  void drawFrame() {
+  std::vector<VkSemaphore> imageAvailableSemaphores;
+  std::vector<VkSemaphore> renderFinishedSemaphores;
+  std::vector<VkFence> inFlightFences;
+
+  uint32_t currentFrame = 0;
+
+  void _drawFrame() {
+    if (!running) {
+      return;
+    }
     // 等待上一帧完成（注意，第一帧还没画的时候，会直接阻塞死，因此要在
     // createSyncObject 即初始化位置处理一下）
-    vkWaitForFences(device, 1, &inFlightFence, VK_TRUE, UINT64_MAX);
+    vkWaitForFences(device, 1, &inFlightFences[currentFrame], VK_TRUE,
+                    UINT64_MAX);
 
-    // 重置fence，让其继续生效（可以下一帧阻塞主线程）。应该立马调用，因为后面的渲染还会用到它。
-    vkResetFences(device, 1, &inFlightFence);
-
-    // 获取接下来渲染的image索引
+    // 获取接下来渲染的image索引。有可能获取失败，就需要重新创建交换链了。
     uint32_t imageIndex;
-    vkAcquireNextImageKHR(device, swapChain, UINT64_MAX,
-                          imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
+    VkResult result = vkAcquireNextImageKHR(
+        device, swapChain, UINT64_MAX, imageAvailableSemaphores[currentFrame],
+        VK_NULL_HANDLE, &imageIndex);
+
+    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR ||
+        framebufferResized) {
+      framebufferResized = false;
+      recreateSwapChain();
+      return;
+    } else if (result != VK_SUCCESS) {
+      throw std::runtime_error("failed to acquire swap chain image!");
+    }
+
+    // 开始绘制前！
+    // 重置fence，让其继续生效（可以下一帧阻塞主线程）。应该立马调用，因为后面的渲染还会用到它。
+    vkResetFences(device, 1, &inFlightFences[currentFrame]);
 
     // 重置 command buffer，准备新的绘制命令
-    vkResetCommandBuffer(commandBuffer, 0);
+    vkResetCommandBuffer(commandBuffers[currentFrame], 0);
     // 绘图
-    recordCommandBuffer(commandBuffer, imageIndex);
+    recordCommandBuffer(commandBuffers[currentFrame], imageIndex);
 
     // 准备提交 command buffer
     VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 
-    VkSemaphore waitSemaphores[] = {imageAvailableSemaphore};
+    VkSemaphore waitSemaphores[] = {imageAvailableSemaphores[currentFrame]};
     VkPipelineStageFlags waitStages[] = {
         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
 
@@ -1217,10 +1345,10 @@ private:
 
     // 具体提交的 command buffer
     submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &commandBuffer;
+    submitInfo.pCommandBuffers = &commandBuffers[currentFrame];
 
     // 执行结束后，signal下面的semaphore；主要通知GPU其他队列或者 swap chain 等
-    VkSemaphore signalSemaphores[] = {renderFinishedSemaphore};
+    VkSemaphore signalSemaphores[] = {renderFinishedSemaphores[currentFrame]};
     submitInfo.signalSemaphoreCount = 1;
     submitInfo.pSignalSemaphores = signalSemaphores;
 
@@ -1229,10 +1357,11 @@ private:
     // renderFinishedSemaphore 的时候就进入了下一帧渲染，从而触发了
     // renderFinishedSemaphore
     // 的使用。但validator无法判断这么细的逻辑，只看到两个队列使用semaphone于是报错。
-    // 这里有个讨论帖子： https://www.reddit.com/r/vulkan/comments/1me8ubj/vulkan_validation_error/
+    // 这里有个讨论帖子：
+    // https://www.reddit.com/r/vulkan/comments/1me8ubj/vulkan_validation_error/
     // 最好做法还是，直接每个swap chain image具备一套信号量。
-    if (vkQueueSubmit(graphicsQueue, 1, &submitInfo, inFlightFence) !=
-        VK_SUCCESS) {
+    if (vkQueueSubmit(graphicsQueue, 1, &submitInfo,
+                      inFlightFences[currentFrame]) != VK_SUCCESS) {
       throw std::runtime_error("failed to submit draw command buffer!");
     }
 
@@ -1253,31 +1382,28 @@ private:
 
     // 呈现 swap chain 中的 image
     vkQueuePresentKHR(presentQueue, &presentInfo);
+
+    currentFrame = (currentFrame + 1) % framesInFlight;
   }
 
   void cleanup() {
-    vkDestroySemaphore(device, imageAvailableSemaphore, nullptr);
-    vkDestroySemaphore(device, renderFinishedSemaphore, nullptr);
-    vkDestroyFence(device, inFlightFence, nullptr);
-    vkDestroyCommandPool(device, commandPool, nullptr);
-    for (auto framebuffer : swapChainFramebuffers) {
-      vkDestroyFramebuffer(device, framebuffer, nullptr);
-    }
+    cleanupSwapChain();
+    cleanupSyncObjects();
 
+    vkDestroyCommandPool(device, commandPool, nullptr);
     vkDestroyPipeline(device, graphicsPipeline, nullptr);
     vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
     vkDestroyRenderPass(device, renderPass, nullptr);
 
-    for (auto imageView : swapChainImageViews) {
-      vkDestroyImageView(device, imageView, nullptr);
-    }
-    vkDestroySwapchainKHR(device, swapChain, nullptr);
     vkDestroyDevice(device, nullptr);
-    vkDestroySurfaceKHR(instance, surface, nullptr);
+
     if (enableValidationLayers) {
       DestroyDebugUtilsMessengerEXT(instance, debugMessenger, nullptr);
     }
+
+    vkDestroySurfaceKHR(instance, surface, nullptr);
     vkDestroyInstance(instance, nullptr);
+
     glfwDestroyWindow(window);
     glfwTerminate();
   }
