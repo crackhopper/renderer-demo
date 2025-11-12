@@ -14,6 +14,9 @@
 #include <stdexcept>
 #include <unordered_set>
 #include <vector>
+#include <thread>
+#include <atomic>
+#include <chrono>
 
 // 用来挑选设备的结构体
 struct DeviceScore {
@@ -780,6 +783,7 @@ private:
 
   static void framebufferResizeCallback(GLFWwindow *window, int width,
                                         int height) {
+    // std::cout << "framebuffer resized: " << width << " " << height << std::endl;
     auto app = reinterpret_cast<HelloTriangleApplication *>(
         glfwGetWindowUserPointer(window));
     app->framebufferResized = true;
@@ -1233,13 +1237,64 @@ private:
     return indices;
   }
 
+  std::atomic<bool> shouldClose{false};
+  std::thread renderThread;
+  std::atomic<bool> renderPaused{false};
+
+  void renderThreadFunc() {
+    auto lastTime = std::chrono::steady_clock::now();
+
+    while (!shouldClose.load()) {
+      if (!renderPaused.load()) {
+        auto currentTime = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            currentTime - lastTime);
+
+        if (elapsed.count() >= 8) { // 约120fps
+          try {
+            drawFrame();
+          } catch (const std::exception &e) {
+            std::cerr << "Render error: " << e.what() << std::endl;
+          }
+          lastTime = currentTime;
+        }
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+  }
   void mainLoop() {
+    // while (!glfwWindowShouldClose(window)) {
+    //   std::cout << "mainLoop: "<< currentFrame << std::endl;
+    //   // 使用带超时的事件等待，避免完全阻塞
+    //   glfwWaitEventsTimeout(0.016); // 约60Hz，16ms超时
+    //   // glfwPollEvents();
+    //   drawFrame();
+    // }
+
+    // // 等待所有队列完成。防止资源占用中被释放导致的问题。
+    // vkDeviceWaitIdle(device);
+
+    // 启动渲染线程
+    renderThread =
+        std::thread(&HelloTriangleApplication::renderThreadFunc, this);
+
+    // 主线程专门处理事件
     while (!glfwWindowShouldClose(window)) {
-      glfwPollEvents();
-      drawFrame();
+      glfwWaitEvents(); // 这里可以安全阻塞
+
+      // 可选：在特定事件时暂停渲染
+      // 比如窗口最小化时
+      int width, height;
+      glfwGetFramebufferSize(window, &width, &height);
+      renderPaused.store(width == 0 || height == 0);
     }
 
-    // 等待所有队列完成。防止资源占用中被释放导致的问题。
+    // 清理
+    shouldClose.store(true);
+    if (renderThread.joinable()) {
+      renderThread.join();
+    }
+
     vkDeviceWaitIdle(device);
   }
 
