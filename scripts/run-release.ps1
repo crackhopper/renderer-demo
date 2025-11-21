@@ -15,5 +15,7 @@ finally {
     Pop-Location
 }
 
+$env:VK_LOADER_LAYERS_DISABLE="~implicit~"
+$env:VK_DRIVER_FILES="C:\WINDOWS\System32\DriverStore\FileRepository\nvmi.inf_amd64_c6ae241e95feb82d\nv-vk64.json"
 ## 运行Release版本
 & ".\\build\\Release\\VulkanGLFWDemo.exe"

@@ -18,6 +18,8 @@
 #include <atomic>
 #include <chrono>
 
+#include "utils.h"
+
 // 用来挑选设备的结构体
 struct DeviceScore {
   VkPhysicalDevice device;
@@ -536,8 +538,8 @@ private:
       extensions.push_back((char *)VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
     }
 
-    extensions.push_back(
-        (char *)VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
+    // extensions.push_back(
+    //     (char *)VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
     return extensions;
   }
 
@@ -689,12 +691,15 @@ private:
       // VkDebugUtilsMessengerCreateInfoEXT 结构体
       populateDebugMessengerCreateInfo(debugCreateInfo);
       createInfo.pNext = (VkDebugUtilsMessengerCreateInfoEXT *)&debugCreateInfo;
+      std::cout << "validation layers enabled" << std::endl;
     } else {
       createInfo.enabledLayerCount = 0;
     }
 
     // 最后可以创建了。保存在成员变量上。
-    if (vkCreateInstance(&createInfo, nullptr, &instance) != VK_SUCCESS) {
+    auto ret = vkCreateInstance(&createInfo, nullptr, &instance);
+    if (ret != VK_SUCCESS) {
+      std::cout << "create instance failed with code: " << ret << std::endl;
       throw std::runtime_error("failed to create instance!");
     }
   }
@@ -978,6 +983,7 @@ private:
     // 你的交换链在应用程序运行过程中可能会变得无效或未优化，例如因为窗口被调整大小。
     // 在这种情况下，交换链实际上需要从头开始重新创建，并且必须在此字段中指定对旧交换链的引用。
     // 这是一个复杂的话题，我们将在未来的章节中了解更多。目前，我们将假设我们只会创建一个交换链。
+    //! 优化resize问题应该看这里了。
     createInfo.oldSwapchain = VK_NULL_HANDLE;
 
     if (vkCreateSwapchainKHR(device, &createInfo, nullptr, &swapChain) !=
@@ -1081,12 +1087,12 @@ private:
       VkPhysicalDeviceDriverProperties driverProps{};
       driverProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES;
 
-      VkPhysicalDeviceProperties2 props2{};
-      props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
-      props2.pNext = &driverProps;
-      vkGetPhysicalDeviceProperties2(device, &props2);
+      // VkPhysicalDeviceProperties2 props2{};
+      // props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+      // props2.pNext = &driverProps;
+      // vkGetPhysicalDeviceProperties2(device, &props2);
 
-      ds.properties = props2.properties;
+      // ds.properties = props2.properties;
       ds.driverProperties = driverProps;
 
       const auto &props = ds.properties;
@@ -1422,7 +1428,10 @@ private:
   }
 };
 
+
 int main() {
+  expSetEnvVK();
+
   HelloTriangleApplication app;
 
   try {
