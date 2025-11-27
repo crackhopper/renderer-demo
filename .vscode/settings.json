@@ -19,7 +19,8 @@
     "files.encoding": "utf8bom"
   },
   "[glsl]": {
-    "files.encoding": "utf8"
+    "files.encoding": "utf8",
+    "editor.defaultFormatter": "nolanderc.glsl-analyzer"
   },  
   "[vert]": {
     "files.encoding": "utf8"

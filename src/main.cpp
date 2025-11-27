@@ -298,8 +298,8 @@ private:
   void createGraphicsPipeline() {
     printCurrentDirectory_cpp17();
     // 读取编译好的 顶点着色器和片段着色器的 SPIR-V 代码
-    auto vertShaderCode = readFile("./build/shaders/vert.spv");
-    auto fragShaderCode = readFile("./build/shaders/frag.spv");
+    auto vertShaderCode = readFile("./build/shaders/shader.vert.spv");
+    auto fragShaderCode = readFile("./build/shaders/shader.frag.spv");
 
     // 创建顶点着色器模块和片段着色器模块
     auto vertShaderModule = createShaderModule(vertShaderCode);
@@ -1042,15 +1042,6 @@ private:
         static_cast<uint32_t>(deviceExtensions.size());
     createInfo.ppEnabledExtensionNames = deviceExtensions.data();
 
-    // 为了兼容老版本的 Vulkan，指定validation layer最好和创建 vulkan instance
-    // 时指定的 validation layer 保持一致。新版本下面的调用不起作用。
-    if (enableValidationLayers) {
-      createInfo.enabledLayerCount =
-          static_cast<uint32_t>(validationLayers.size());
-      createInfo.ppEnabledLayerNames = validationLayers.data();
-    } else {
-      createInfo.enabledLayerCount = 0;
-    }
 
     if (vkCreateDevice(physicalDevice, &createInfo, nullptr, &device) !=
         VK_SUCCESS) {
