@@ -42,6 +42,7 @@ set(SOURCES
 )
 add_executable(${PROJECT_NAME} ${SOURCES})
 target_link_libraries(${PROJECT_NAME} PRIVATE Vulkan::Vulkan glfw)
+target_include_directories(${PROJECT_NAME} PRIVATE include)
 # -------------------------------
 # Windows 特殊：定义宏
 # 关闭MSVC的安全警告，例如，用 strcpy_s 替代 strcpy，用 scanf_s 替代 scanf
@@ -56,6 +57,7 @@ endif()
 
 # 引入shader编译的target
 add_subdirectory(shaders)
+add_dependencies(${PROJECT_NAME} CompileShaders)
 
 # 引入 experiments 目录的构建
 add_subdirectory(experiments)
