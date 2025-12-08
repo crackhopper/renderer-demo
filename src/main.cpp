@@ -20,6 +20,7 @@
 #include <vector>
 
 #define GLM_FORCE_RADIANS
+#define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #include "glm/glm.hpp"
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -66,7 +67,7 @@ void printCurrentDirectory_cpp17() {
 }
 
 struct Vertex {
-  glm::vec2 pos;
+  glm::vec3 pos;
   glm::vec3 color;
   glm::vec2 texCoord;
 
@@ -83,7 +84,7 @@ struct Vertex {
     std::array<VkVertexInputAttributeDescription, 3> attributeDescriptions{};
     attributeDescriptions[0].binding = 0;
     attributeDescriptions[0].location = 0;
-    attributeDescriptions[0].format = VK_FORMAT_R32G32_SFLOAT;
+    attributeDescriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
     attributeDescriptions[0].offset = offsetof(Vertex, pos);
 
     attributeDescriptions[1].binding = 0;
@@ -100,12 +101,17 @@ struct Vertex {
 };
 
 const std::vector<Vertex> vertices = {
-    {{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f}},
-    {{0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
-    {{0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
-    {{-0.5f, 0.5f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}}};
+    {{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
+    {{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
+    {{0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}},
+    {{-0.5f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}},
 
-const std::vector<uint16_t> indices = {0, 1, 2, 2, 3, 0};
+    {{-0.5f, -0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
+    {{0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
+    {{0.5f, 0.5f, -0.5f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}},
+    {{-0.5f, 0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}}};
+
+const std::vector<uint16_t> indices = {0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4};
 
 struct UniformBufferObject {
   alignas(16) glm::mat4 model;
@@ -192,9 +198,12 @@ private:
     renderPassInfo.renderArea.offset = {0, 0};
     renderPassInfo.renderArea.extent = swapChainExtent;
     // 设定clear value
-    VkClearValue clearColor = {{0.0f, 0.0f, 0.0f, 1.0f}};
-    renderPassInfo.clearValueCount = 1;
-    renderPassInfo.pClearValues = &clearColor;
+    std::array<VkClearValue, 2> clearValues{};
+    clearValues[0].color = {{0.0f, 0.0f, 0.0f, 1.0f}};
+    clearValues[1].depthStencil = {1.0f, 0};
+    renderPassInfo.clearValueCount = clearValues.size();
+    renderPassInfo.pClearValues = clearValues.data();
+
     // 启动render pass
     vkCmdBeginRenderPass(commandBuffer, &renderPassInfo,
                          VK_SUBPASS_CONTENTS_INLINE);
@@ -455,6 +464,62 @@ private:
     vkBindBufferMemory(device, buffer, bufferMemory, 0); // 0代表偏移量
   }
 
+  VkImage depthImage;
+  VkDeviceMemory depthImageMemory;
+  VkImageView depthImageView;
+
+  void createDepthResources() {
+    VkFormat depthFormat = findDepthFormat();
+    createImage(
+        swapChainExtent.width, swapChainExtent.height, depthFormat,
+        VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, depthImage, depthImageMemory);
+
+    depthImageView =
+        createImageView(depthImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
+
+    // 手动显式转化layout （实际上并不需要，renderPass会自动搞定，这里只是演示）
+    transitionImageLayout(depthImage, depthFormat, VK_IMAGE_LAYOUT_UNDEFINED,
+                          VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+  }
+
+  // 判断选择的格式是否支持stencil(模板)
+  bool hasStencilComponent(VkFormat format) {
+    return format == VK_FORMAT_D32_SFLOAT_S8_UINT ||
+           format == VK_FORMAT_D24_UNORM_S8_UINT;
+  }
+
+  // 我们具体查找格式的用法
+  VkFormat findDepthFormat() {
+    return findSupportedFormat({VK_FORMAT_D32_SFLOAT,
+                                VK_FORMAT_D32_SFLOAT_S8_UINT,
+                                VK_FORMAT_D24_UNORM_S8_UINT},
+                               VK_IMAGE_TILING_OPTIMAL,
+                               VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT);
+  }
+
+  VkFormat findSupportedFormat(const std::vector<VkFormat> &candidates,
+                               VkImageTiling tiling,
+                               VkFormatFeatureFlags features) {
+    for (VkFormat format : candidates) {
+      VkFormatProperties props;
+      vkGetPhysicalDeviceFormatProperties(physicalDevice, format, &props);
+      if (tiling == VK_IMAGE_TILING_LINEAR &&
+          // props.linearTilingFeatures 返回了格式所支持的 linear tiling 下的
+          // feature
+          (props.linearTilingFeatures & features) == features) {
+        return format;
+      } else if (tiling == VK_IMAGE_TILING_OPTIMAL &&
+                 // props.optimalTilingFeatures 返回了格式所支持的 optimal
+                 // tiling 下的 feature
+                 (props.optimalTilingFeatures & features) == features) {
+        return format;
+      }
+    }
+    // 查找格式失败，扔出异常。
+    throw std::runtime_error("failed to find supported format!");
+  }
+
   void transitionImageLayout(VkImage image, VkFormat format,
                              VkImageLayout oldLayout, VkImageLayout newLayout) {
     VkCommandBuffer commandBuffer = beginSingleTimeCommands();
@@ -481,6 +546,16 @@ private:
     barrier.subresourceRange.levelCount = 1;     // 只影响1层mipmap
     barrier.subresourceRange.baseArrayLayer = 0; // 从第0层数组开始
     barrier.subresourceRange.layerCount = 1;     // 只影响1层数组
+
+    if (newLayout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL) {
+      barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+
+      if (hasStencilComponent(format)) {
+        barrier.subresourceRange.aspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
+      }
+    } else {
+      barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    }
 
     // 定义源和目标的 pipeline 阶段，用于同步
     VkPipelineStageFlags sourceStage;
@@ -511,6 +586,14 @@ private:
       sourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
       // 目标阶段：在片段着色器读取之前
       destinationStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    } else if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED &&
+               newLayout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL) {
+      barrier.srcAccessMask = 0;
+      barrier.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+                              VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+
+      sourceStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+      destinationStage = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
     } else {
       // 其他布局转换不支持
       throw std::invalid_argument("unsupported layout transition!");
@@ -656,7 +739,8 @@ private:
   VkImageView textureImageView;
   VkSampler textureSampler;
   void createTextureImageView() {
-    textureImageView = createImageView(textureImage, VK_FORMAT_R8G8B8A8_SRGB);
+    textureImageView = createImageView(textureImage, VK_FORMAT_R8G8B8A8_SRGB,
+                                       VK_IMAGE_ASPECT_COLOR_BIT);
   }
 
   void createTextureSampler() {
@@ -769,13 +853,14 @@ private:
     // We'll then iterate through the image views and create framebuffers from
     // them:
     for (size_t i = 0; i < swapChainImageViews.size(); i++) {
-      VkImageView attachments[] = {swapChainImageViews[i]};
+      std::array<VkImageView, 2> attachments = {swapChainImageViews[i],
+                                                depthImageView};
 
       VkFramebufferCreateInfo framebufferInfo{};
       framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
       framebufferInfo.renderPass = renderPass;
-      framebufferInfo.attachmentCount = 1;
-      framebufferInfo.pAttachments = attachments;
+      framebufferInfo.attachmentCount = attachments.size();
+      framebufferInfo.pAttachments = attachments.data();
       framebufferInfo.width = swapChainExtent.width;
       framebufferInfo.height = swapChainExtent.height;
       framebufferInfo.layers = 1;
@@ -814,16 +899,42 @@ private:
     colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 
+    // VkAttachmentDescription 结构体，用于描述深度附件。
+    VkAttachmentDescription depthAttachment{};
+    depthAttachment.format = findDepthFormat();
+    depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+    // **加载操作 (Load Op):** 在渲染开始时，如何处理深度附件中的现有数据。
+    // VK_ATTACHMENT_LOAD_OP_CLEAR 表示在渲染此 Render Pass
+    // 时，附件中的所有像素将被清除为预设值 (通常为 1.0f，表示最远)。
+    depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    // **存储操作 (Store Op):** 在渲染结束时，如何处理深度附件中的数据。
+    // VK_ATTACHMENT_STORE_OP_DONT_CARE
+    // 表示渲染完成后，深度数据的内容不需要被保留或写回内存。
+    depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    depthAttachment.finalLayout =
+        VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
     // subpass相关
     VkAttachmentReference colorAttachmentRef{};
     colorAttachmentRef.attachment =
         0; // 这个代表索引0，和renderPassInfo.pAttachments[0]对应
     colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
+    // 方便subpass引用附件。
+    VkAttachmentReference depthAttachmentRef{};
+    depthAttachmentRef.attachment = 1;
+    depthAttachmentRef.layout =
+        VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
     VkSubpassDescription subpass{};
     subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
     subpass.colorAttachmentCount = 1;
     subpass.pColorAttachments = &colorAttachmentRef;
+    subpass.pDepthStencilAttachment = &depthAttachmentRef;
+
     // The index of the attachment in this array is directly referenced from
     // the fragment shader with the layout(location = 0) out vec4 outColor
     // directive!
@@ -833,15 +944,20 @@ private:
     VkSubpassDependency dependency{};
     dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
     dependency.dstSubpass = 0;
-    dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    dependency.srcAccessMask = 0;
-    dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+                              VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+    dependency.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+                              VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+    dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+                               VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
 
+    std::array<VkAttachmentDescription, 2> attachments = {colorAttachment,
+                                                          depthAttachment};
     VkRenderPassCreateInfo renderPassInfo{};
     renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    renderPassInfo.attachmentCount = 1;
-    renderPassInfo.pAttachments = &colorAttachment;
+    renderPassInfo.attachmentCount = attachments.size();
+    renderPassInfo.pAttachments = attachments.data();
     renderPassInfo.subpassCount = 1;
     renderPassInfo.pSubpasses = &subpass;
     renderPassInfo.dependencyCount = 1;
@@ -1033,6 +1149,22 @@ private:
       throw std::runtime_error("failed to create pipeline layout!");
     }
 
+    VkPipelineDepthStencilStateCreateInfo depthStencil{};
+    depthStencil.sType =
+        VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+    // 测试fragment是否通过
+    depthStencil.depthTestEnable = VK_TRUE;
+    // 测试通过后，是否写入depth
+    depthStencil.depthWriteEnable = VK_TRUE;
+
+    // 更小的深度值可以写入
+    depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
+
+    // 特殊能力，仅保留depth在某个区间的fragment 进行测试。
+    depthStencil.depthBoundsTestEnable = VK_FALSE;
+    depthStencil.minDepthBounds = 0.0f; // Optional
+    depthStencil.maxDepthBounds = 1.0f; // Optional
+
     // 在拥有了 render pass， pipeline layout,
     // 以及上面关于pipeline的各种配置。 我们 终于可以 创建 graphics pipeline
     // 了
@@ -1055,7 +1187,7 @@ private:
     // 绑定多采样状态定义（描述多采样的行为，如样本数、alpha 到覆盖率等）
     pipelineInfo.pMultisampleState = &multisampling;
     // 绑定深度测试状态定义（描述深度测试的行为，如深度测试使能、比较操作等）
-    pipelineInfo.pDepthStencilState = nullptr; // Optional
+    pipelineInfo.pDepthStencilState = &depthStencil; // Optional
     // 绑定颜色混合状态定义（描述颜色混合的行为，如混合因子、混合操作等）
     pipelineInfo.pColorBlendState = &colorBlending;
 
@@ -1397,9 +1529,11 @@ private:
     createRenderPass();
     createDescriptorSetLayout();
     createGraphicsPipeline();
-    createFramebuffers();
     createCommandPool();
     createCommandBuffers();
+
+    createDepthResources();
+    createFramebuffers();
 
     createTextureImage();
     createTextureImageView();
@@ -1464,13 +1598,14 @@ private:
   VkExtent2D swapChainExtent;
   std::vector<VkImageView> swapChainImageViews;
 
-  VkImageView createImageView(VkImage image, VkFormat format) {
+  VkImageView createImageView(VkImage image, VkFormat format,
+                              VkImageAspectFlags aspectFlags) {
     VkImageViewCreateInfo viewInfo{};
     viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     viewInfo.image = image;
     viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
     viewInfo.format = format;
-    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    viewInfo.subresourceRange.aspectMask = aspectFlags;
     viewInfo.subresourceRange.baseMipLevel = 0;
     viewInfo.subresourceRange.levelCount = 1;
     viewInfo.subresourceRange.baseArrayLayer = 0;
@@ -1488,12 +1623,16 @@ private:
   void createImageViews() {
     swapChainImageViews.resize(swapChainImages.size());
     for (size_t i = 0; i < swapChainImages.size(); i++) {
-      swapChainImageViews[i] =
-          createImageView(swapChainImages[i], swapChainImageFormat);
+      swapChainImageViews[i] = createImageView(
+          swapChainImages[i], swapChainImageFormat, VK_IMAGE_ASPECT_COLOR_BIT);
     }
   }
 
   void cleanupSwapChain() {
+    vkDestroyImageView(device, depthImageView, nullptr);
+    vkDestroyImage(device, depthImage, nullptr);
+    vkFreeMemory(device, depthImageMemory, nullptr);
+
     for (auto framebuffer : swapChainFramebuffers) {
       vkDestroyFramebuffer(device, framebuffer, nullptr);
     }
@@ -1520,6 +1659,7 @@ private:
 
     createSwapChain();
     createImageViews();
+    createDepthResources();
     createFramebuffers();
 
     createSyncObjects();
@@ -1913,7 +2053,7 @@ private:
 
   uint32_t currentFrame = 0;
 
-  void updateUniformBuffer(uint32_t frameIndex) {
+  void updateUniformBuffer(uint32_t frameIndex, bool rotate = true) {
     static auto startTime = std::chrono::high_resolution_clock::now();
     auto currentTime = std::chrono::high_resolution_clock::now();
     float time = std::chrono::duration<float, std::chrono::seconds::period>(
@@ -1921,8 +2061,12 @@ private:
                      .count();
 
     UniformBufferObject ubo{};
-    ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f),
-                            glm::vec3(0.0f, 0.0f, 1.0f));
+    if (!rotate) {
+      ubo.model = glm::mat4(1.0f);
+    } else {
+      ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f),
+                              glm::vec3(0.0f, 0.0f, 1.0f));
+    }
     // 视图变换：摄像机从 (2,2,2) 看向原点
     ubo.view =
         glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f),
@@ -1968,7 +2112,7 @@ private:
     recordCommandBuffer(commandBuffers[currentFrame], imageIndex);
 
     // 更新uniform buffer(只要在提交前更新就行)
-    updateUniformBuffer(currentFrame);
+    updateUniformBuffer(currentFrame, false);
 
     // 准备提交 command buffer
     VkSubmitInfo submitInfo{};
