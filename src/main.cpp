@@ -24,11 +24,22 @@
 #include "glm/glm.hpp"
 #include <glm/gtc/matrix_transform.hpp>
 
+#include <unordered_map>
+
+// 为了计算 glm 数据结构的hash，需要引入
+#define GLM_ENABLE_EXPERIMENTAL
+#include <glm/gtx/hash.hpp>
+
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb/stb_image.h>
 
+#define TINYOBJLOADER_IMPLEMENTATION
+#include <tinyobjloader/tiny_obj_loader.h>
+
 #include "utils.h"
 
+const std::string MODEL_PATH = "models/viking_room.obj";
+const std::string TEXTURE_PATH = "textures/viking_room.png";
 // 用来挑选设备的结构体
 struct DeviceScore {
   VkPhysicalDevice device;
@@ -71,6 +82,11 @@ struct Vertex {
   glm::vec3 color;
   glm::vec2 texCoord;
 
+  bool operator==(const Vertex &other) const {
+    return pos == other.pos && color == other.color &&
+           texCoord == other.texCoord;
+  }
+
   static VkVertexInputBindingDescription getBindingDescription() {
     VkVertexInputBindingDescription bindingDescription{};
     bindingDescription.binding = 0;
@@ -100,18 +116,33 @@ struct Vertex {
   }
 };
 
-const std::vector<Vertex> vertices = {
-    {{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
-    {{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
-    {{0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}},
-    {{-0.5f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}},
+// 为了支持 unorder_map 的key需要的trait，我们还需要特化 std::hash<T>
+// ，提供计算hash的方法 下面的计算方法是参照
+// https://en.cppreference.com/w/cpp/utility/hash.html
+// 提供的一个快速便携计算hash的方法
+namespace std {
+template <> struct hash<Vertex> {
+  size_t operator()(Vertex const &vertex) const {
+    return ((hash<glm::vec3>()(vertex.pos) ^
+             (hash<glm::vec3>()(vertex.color) << 1)) >>
+            1) ^
+           (hash<glm::vec2>()(vertex.texCoord) << 1);
+  }
+};
+} // namespace std
 
-    {{-0.5f, -0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
-    {{0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
-    {{0.5f, 0.5f, -0.5f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}},
-    {{-0.5f, 0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}}};
+// const std::vector<Vertex> vertices = {
+//     {{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
+//     {{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
+//     {{0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}},
+//     {{-0.5f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}},
 
-const std::vector<uint16_t> indices = {0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4};
+//     {{-0.5f, -0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
+//     {{0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
+//     {{0.5f, 0.5f, -0.5f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}},
+//     {{-0.5f, 0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}}};
+
+// const std::vector<uint16_t> indices = {0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4};
 
 struct UniformBufferObject {
   alignas(16) glm::mat4 model;
@@ -231,7 +262,7 @@ private:
     VkBuffer vertexBuffers[] = {vertexBuffer};
     VkDeviceSize offsets[] = {0};
     vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
-    vkCmdBindIndexBuffer(commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT16);
+    vkCmdBindIndexBuffer(commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
     // 绑定描述符集
     vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
@@ -264,6 +295,61 @@ private:
     }
 
     throw std::runtime_error("failed to find suitable memory type!");
+  }
+
+  std::vector<Vertex> vertices;
+  std::vector<uint32_t> indices; // 注意更改到了 uint32_t
+
+  void loadModel() {
+    tinyobj::attrib_t attrib;
+    std::vector<tinyobj::shape_t> shapes;
+    std::vector<tinyobj::material_t> materials;
+    std::string warn;
+    std::string err;
+
+    if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err,
+                          MODEL_PATH.c_str())) {
+      throw std::runtime_error(err);
+    }
+
+    // OBJ 文件，包含： 位置(positions)、法项(normals)、纹理坐标(texture coords)
+    // 保存在 `attrib.vertices` , `attrib.normals` 和 `attrib.texcoords`
+    // (整体的数据)
+    //
+    // `shapes` 包含了所有对象以及它们的面(face)的索引信息。
+    // 每个面包含了一组顶点，每个顶点包含了对应的 position, normal 和 texture
+    // coords 信息。 OBJ文件还可以对每个face定义对应的material 和
+    // texture。我们暂时i忽略这些。
+
+    // 这里面我们用一个 unorder_map (hashmap)
+    // ，以顶点作为key，来确保顶点数据唯一性。
+    std::unordered_map<Vertex, uint32_t> uniqueVertices{};
+    // 我们接下来要把所有的face拼接到一个顶点数据中。
+    for (const auto &shape : shapes) {
+      for (const auto &index : shape.mesh.indices) {
+        Vertex vertex{};
+        // 由于 attrib.vertices 中是展开保存的数据，所以我们要用 3*idx+i
+        // 的方式取数值
+        vertex.pos = {attrib.vertices[3 * index.vertex_index + 0],
+                      attrib.vertices[3 * index.vertex_index + 1],
+                      attrib.vertices[3 * index.vertex_index + 2]};
+        // 纹理坐标类似
+        // vertex.texCoord = {attrib.texcoords[2 * index.texcoord_index + 0],
+        //                    attrib.texcoords[2 * index.texcoord_index + 1]};
+        vertex.texCoord = {
+            attrib.texcoords[2 * index.texcoord_index + 0],
+            // vulkan的纹理坐标y方向和OBJ文件定义的Y方向并不一样。因此需要反转y坐标
+            1.0f - attrib.texcoords[2 * index.texcoord_index + 1]};
+
+        vertex.color = {1.0f, 1.0f, 1.0f};
+
+        if (uniqueVertices.count(vertex) == 0) {
+          uniqueVertices[vertex] = static_cast<uint32_t>(vertices.size());
+          vertices.push_back(vertex);
+        }
+        indices.push_back(uniqueVertices[vertex]);
+      }
+    }
   }
 
   VkBuffer vertexBuffer;
@@ -613,7 +699,10 @@ private:
   void createTextureImage() {
     int texWidth, texHeight, texChannels;
     // 加载图像像素为一个指针
-    stbi_uc *pixels = stbi_load("textures/texture.jpg", &texWidth, &texHeight,
+    // stbi_uc *pixels = stbi_load("textures/texture.jpg", &texWidth,
+    // &texHeight,
+    //                             &texChannels, STBI_rgb_alpha);
+    stbi_uc *pixels = stbi_load(TEXTURE_PATH.c_str(), &texWidth, &texHeight,
                                 &texChannels, STBI_rgb_alpha);
     VkDeviceSize imageSize = texWidth * texHeight * 4;
 
@@ -1539,6 +1628,7 @@ private:
     createTextureImageView();
     createTextureSampler();
 
+    loadModel();
     createVertexBuffer();
     createIndexBuffer();
     createUniformBuffer();

@@ -16,7 +16,6 @@ Makefile
 *.exe
 *.dll
 *.pdb
-*.obj
 *.lib
 *.idb
 *.suo
