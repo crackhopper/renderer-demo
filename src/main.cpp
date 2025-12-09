@@ -38,13 +38,16 @@
 
 #include "utils.h"
 
-const bool GLOBAL_CONTROL_RENDER_BLACK=false;
+const bool GLOBAL_CONTROL_RENDER_BLACK = false;
 
 const bool GLOBAL_CONTROL_ROTATE = false;
 const bool GLOBAL_CONTROL_MIPMAP = true;
 const bool GLOBAL_CONTROL_USE_MIPLODBIAS = false;
-const int GLOBAL_CONTROL_MIPLODBIAS = 2;
+const int GLOBAL_CONTROL_MIPLODBIAS = 0;
 
+const bool GLOBAL_CONTROL_MSAA = true;
+const bool GLOBAL_CONTROL_MSAA_SAMPLE_RATE_SHADING = false;
+const float GLOBAL_CONTROL_MSAA_MIN_SAMPLE_SHADING = 0.2f;
 
 const std::string MODEL_PATH = "models/viking_room.obj";
 const std::string TEXTURE_PATH = "textures/viking_room.png";
@@ -278,8 +281,8 @@ private:
                             0, nullptr);
 
     if (!GLOBAL_CONTROL_RENDER_BLACK) {
-      vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(indices.size()), 1, 0,
-                     0, 0);
+      vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(indices.size()), 1,
+                       0, 0, 0);
     }
 
     // 结束render pass
@@ -560,16 +563,34 @@ private:
     vkBindBufferMemory(device, buffer, bufferMemory, 0); // 0代表偏移量
   }
 
+  VkImage colorImage;
+  VkDeviceMemory colorImageMemory;
+  VkImageView colorImageView;
+
+  void createColorResources() {
+    VkFormat colorFormat = swapChainImageFormat;
+
+    createImage(swapChainExtent.width, swapChainExtent.height, 1, msaaSamples,
+                colorFormat, VK_IMAGE_TILING_OPTIMAL,
+                VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT |
+                    VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, colorImage,
+                colorImageMemory);
+    colorImageView =
+        createImageView(colorImage, colorFormat, VK_IMAGE_ASPECT_COLOR_BIT, 1);
+  }
+
   VkImage depthImage;
   VkDeviceMemory depthImageMemory;
   VkImageView depthImageView;
 
   void createDepthResources() {
     VkFormat depthFormat = findDepthFormat();
-    createImage(
-        swapChainExtent.width, swapChainExtent.height, 1, depthFormat,
-        VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, depthImage, depthImageMemory);
+    createImage(swapChainExtent.width, swapChainExtent.height, 1, msaaSamples,
+                depthFormat, VK_IMAGE_TILING_OPTIMAL,
+                VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, depthImage,
+                depthImageMemory);
 
     depthImageView =
         createImageView(depthImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT, 1);
@@ -740,8 +761,8 @@ private:
     stbi_image_free(pixels);
 
     createImage(
-        texWidth, texHeight, mipLevels, VK_FORMAT_R8G8B8A8_SRGB,
-        VK_IMAGE_TILING_OPTIMAL,
+        texWidth, texHeight, mipLevels, VK_SAMPLE_COUNT_1_BIT,
+        VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL,
         VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
             VK_IMAGE_USAGE_SAMPLED_BIT,
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, textureImage, textureImageMemory);
@@ -925,6 +946,7 @@ private:
 
   void createImage(
       uint32_t width, uint32_t height, uint32_t mipLevels,
+      VkSampleCountFlagBits numSamples,
       VkFormat format,                  // 像素格式，如 R8G8B8A8_SRGB
       VkImageTiling tiling,             // 内存布局 （决定硬件访问效率）
       VkImageUsageFlags usage,          // 用途
@@ -950,8 +972,8 @@ private:
     // GPU无法直接使用初始数据，第一次写入会覆盖现有内容。
     imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     imageInfo.usage = usage;
-    // 如果是多重采样渲染的目标图像，这个值会大于1。
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    // 目标图像是否支持多采样
+    imageInfo.samples = numSamples;
     // 独占队列访问（仅图形队列）
     imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
@@ -1106,8 +1128,11 @@ private:
     // We'll then iterate through the image views and create framebuffers from
     // them:
     for (size_t i = 0; i < swapChainImageViews.size(); i++) {
-      std::array<VkImageView, 2> attachments = {swapChainImageViews[i],
-                                                depthImageView};
+      std::array<VkImageView, 3> attachments = {
+          colorImageView, // 这里是渲染目标
+          depthImageView,
+          // 这块会最后resolve上面的渲染结果
+          swapChainImageViews[i]};
 
       VkFramebufferCreateInfo framebufferInfo{};
       framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
@@ -1129,10 +1154,7 @@ private:
     VkAttachmentDescription colorAttachment{};
     colorAttachment.format = swapChainImageFormat;
 
-    // The format of the color attachment should match the format of the swap
-    // chain images, and we're not doing anything with multisampling yet, so
-    // we'll stick to 1 sample.
-    colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+    colorAttachment.samples = msaaSamples;
 
     // The loadOp and storeOp determine what to do with the data in the
     // attachment before rendering and after rendering.
@@ -1150,12 +1172,12 @@ private:
     // with a certain pixel format, however the layout of the pixels in memory
     // can change based on what you're trying to do with an image.
     colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    colorAttachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
     // VkAttachmentDescription 结构体，用于描述深度附件。
     VkAttachmentDescription depthAttachment{};
     depthAttachment.format = findDepthFormat();
-    depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+    depthAttachment.samples = msaaSamples;
     // **加载操作 (Load Op):** 在渲染开始时，如何处理深度附件中的现有数据。
     // VK_ATTACHMENT_LOAD_OP_CLEAR 表示在渲染此 Render Pass
     // 时，附件中的所有像素将被清除为预设值 (通常为 1.0f，表示最远)。
@@ -1170,6 +1192,17 @@ private:
     depthAttachment.finalLayout =
         VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
+    // 用来resolve MSAA的attachment，显示到屏幕。
+    VkAttachmentDescription colorAttachmentResolve{};
+    colorAttachmentResolve.format = swapChainImageFormat;
+    colorAttachmentResolve.samples = VK_SAMPLE_COUNT_1_BIT;
+    colorAttachmentResolve.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    colorAttachmentResolve.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    colorAttachmentResolve.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    colorAttachmentResolve.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    colorAttachmentResolve.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    colorAttachmentResolve.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
     // subpass相关
     VkAttachmentReference colorAttachmentRef{};
     colorAttachmentRef.attachment =
@@ -1182,11 +1215,16 @@ private:
     depthAttachmentRef.layout =
         VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
+    VkAttachmentReference colorAttachmentResolveRef{};
+    colorAttachmentResolveRef.attachment = 2;
+    colorAttachmentResolveRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
     VkSubpassDescription subpass{};
     subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
     subpass.colorAttachmentCount = 1;
     subpass.pColorAttachments = &colorAttachmentRef;
     subpass.pDepthStencilAttachment = &depthAttachmentRef;
+    subpass.pResolveAttachments = &colorAttachmentResolveRef;
 
     // The index of the attachment in this array is directly referenced from
     // the fragment shader with the layout(location = 0) out vec4 outColor
@@ -1199,14 +1237,16 @@ private:
     dependency.dstSubpass = 0;
     dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
                               VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-    dependency.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    dependency.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+                               VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+
     dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
                               VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
     dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
                                VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
 
-    std::array<VkAttachmentDescription, 2> attachments = {colorAttachment,
-                                                          depthAttachment};
+    std::array<VkAttachmentDescription, 3> attachments = {
+        colorAttachment, depthAttachment, colorAttachmentResolve};
     VkRenderPassCreateInfo renderPassInfo{};
     renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
     renderPassInfo.attachmentCount = attachments.size();
@@ -1354,9 +1394,21 @@ private:
     VkPipelineMultisampleStateCreateInfo multisampling{};
     multisampling.sType =
         VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    multisampling.sampleShadingEnable = VK_FALSE;
-    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-    multisampling.minSampleShading = 1.0f;          // Optional
+
+    if (GLOBAL_CONTROL_MSAA) {
+      multisampling.rasterizationSamples = msaaSamples;
+      if (GLOBAL_CONTROL_MSAA_SAMPLE_RATE_SHADING) {
+        multisampling.sampleShadingEnable = VK_TRUE;
+        multisampling.minSampleShading = GLOBAL_CONTROL_MSAA_MIN_SAMPLE_SHADING;
+      } else {
+        multisampling.sampleShadingEnable = VK_FALSE;
+        multisampling.minSampleShading = 1.0f;
+      }
+    } else {
+      multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+      multisampling.sampleShadingEnable = VK_FALSE;
+      multisampling.minSampleShading = 1.0f; // Optional
+    }
     multisampling.pSampleMask = nullptr;            // Optional
     multisampling.alphaToCoverageEnable = VK_FALSE; // Optional
     multisampling.alphaToOneEnable = VK_FALSE;      // Optional
@@ -1785,6 +1837,7 @@ private:
     createCommandPool();
     createCommandBuffers();
 
+    createColorResources();
     createDepthResources();
     createFramebuffers();
 
@@ -1885,6 +1938,10 @@ private:
   }
 
   void cleanupSwapChain() {
+    vkDestroyImageView(device, colorImageView, nullptr);
+    vkDestroyImage(device, colorImage, nullptr);
+    vkFreeMemory(device, colorImageMemory, nullptr);
+
     vkDestroyImageView(device, depthImageView, nullptr);
     vkDestroyImage(device, depthImage, nullptr);
     vkFreeMemory(device, depthImageMemory, nullptr);
@@ -1915,6 +1972,7 @@ private:
 
     createSwapChain();
     createImageViews();
+    createColorResources();
     createDepthResources();
     createFramebuffers();
 
@@ -2025,6 +2083,9 @@ private:
     // 开启geometry shader
     deviceFeatures.geometryShader = useGeometryShader ? VK_TRUE : VK_FALSE;
     deviceFeatures.samplerAnisotropy = VK_TRUE;
+    if (GLOBAL_CONTROL_MSAA && GLOBAL_CONTROL_MSAA_SAMPLE_RATE_SHADING) {
+      deviceFeatures.sampleRateShading = VK_TRUE;
+    }
 
     VkDeviceCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -2048,6 +2109,37 @@ private:
     vkGetDeviceQueue(device, indices.graphicsFamily.value(), 0, &graphicsQueue);
     // 获取present queue
     vkGetDeviceQueue(device, indices.presentFamily.value(), 0, &presentQueue);
+  }
+
+  VkSampleCountFlagBits msaaSamples = VK_SAMPLE_COUNT_1_BIT;
+
+  VkSampleCountFlagBits getMaxUsableSampleCount() {
+    VkPhysicalDeviceProperties physicalDeviceProperties;
+    vkGetPhysicalDeviceProperties(physicalDevice, &physicalDeviceProperties);
+
+    VkSampleCountFlags counts =
+        physicalDeviceProperties.limits.framebufferColorSampleCounts &
+        physicalDeviceProperties.limits.framebufferDepthSampleCounts;
+    if (counts & VK_SAMPLE_COUNT_64_BIT) {
+      return VK_SAMPLE_COUNT_64_BIT;
+    }
+    if (counts & VK_SAMPLE_COUNT_32_BIT) {
+      return VK_SAMPLE_COUNT_32_BIT;
+    }
+    if (counts & VK_SAMPLE_COUNT_16_BIT) {
+      return VK_SAMPLE_COUNT_16_BIT;
+    }
+    if (counts & VK_SAMPLE_COUNT_8_BIT) {
+      return VK_SAMPLE_COUNT_8_BIT;
+    }
+    if (counts & VK_SAMPLE_COUNT_4_BIT) {
+      return VK_SAMPLE_COUNT_4_BIT;
+    }
+    if (counts & VK_SAMPLE_COUNT_2_BIT) {
+      return VK_SAMPLE_COUNT_2_BIT;
+    }
+
+    return VK_SAMPLE_COUNT_1_BIT;
   }
 
   void pickPhysicalDevice() {
@@ -2108,6 +2200,11 @@ private:
     // 6. 选择最佳设备
     if (bestDevice != scoredDevices.end()) {
       physicalDevice = bestDevice->device;
+      if (GLOBAL_CONTROL_MSAA) {
+        msaaSamples = getMaxUsableSampleCount();
+      }else{
+        msaaSamples = VK_SAMPLE_COUNT_1_BIT;
+      }
       std::cout << "\n Successfully picked best device: "
                 << bestDevice->properties.deviceName
                 << " (Score: " << bestDevice->score << ")" << std::endl;
