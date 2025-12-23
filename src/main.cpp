@@ -1,5 +1,6 @@
-#define GLFW_INCLUDE_VULKAN
-#include <GLFW/glfw3.h>
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_vulkan.h>
+#include <vulkan/vulkan.h>
 
 #include <algorithm>
 #include <array>
@@ -12,12 +13,17 @@
 #include <fstream>
 #include <iostream>
 #include <limits>
+#include <mutex>
 #include <optional>
 #include <set>
 #include <stdexcept>
 #include <thread>
 #include <unordered_set>
 #include <vector>
+
+#include <backends/imgui_impl_sdl3.h>
+#include <backends/imgui_impl_vulkan.h>
+#include <imgui.h>
 
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
@@ -61,11 +67,13 @@ struct DeviceScore {
 };
 
 struct QueueFamilyIndices {
-  std::optional<uint32_t> graphicsFamily; // 图形队列族索引
-  std::optional<uint32_t> presentFamily;  // 呈现队列族索引
+  std::optional<uint32_t> graphicsAndComputeFamily; // 图形和计算队列族索引
+  std::optional<uint32_t> graphicsFamily;           // 图形队列族索引
+  std::optional<uint32_t> presentFamily;            // 呈现队列族索引
 
   bool isComplete() {
-    return graphicsFamily.has_value() && presentFamily.has_value();
+    return graphicsFamily.has_value() && presentFamily.has_value() &&
+           graphicsAndComputeFamily;
   }
 };
 
@@ -171,7 +179,7 @@ public:
   }
 
 private:
-  GLFWwindow *window;
+  SDL_Window *window;
   const uint32_t WIDTH = 800;
   const uint32_t HEIGHT = 600;
 
@@ -283,6 +291,12 @@ private:
     if (!GLOBAL_CONTROL_RENDER_BLACK) {
       vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(indices.size()), 1,
                        0, 0, 0);
+    }
+
+    // 渲染 ImGui
+    std::lock_guard<std::mutex> lock(drawDataMutex);
+    if (drawDataForRenderThread) {
+      ImGui_ImplVulkan_RenderDrawData(drawDataForRenderThread, commandBuffer);
     }
 
     // 结束render pass
@@ -432,15 +446,22 @@ private:
   void createDescriptorPool() {
     std::array<VkDescriptorPoolSize, 2> poolSizes{};
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+    poolSizes[0].descriptorCount =
+        static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 2);
     poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+    poolSizes[1].descriptorCount =
+        static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT * 4);
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
+    // VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT：允许单独释放
+    // descriptor set，建议添加。
+    poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
     poolInfo.pPoolSizes = poolSizes.data();
-    poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+    // maxSets ≥ 每帧渲染使用的 descriptor set 数量（一般 ≥ MAX_FRAMES_IN_FLIGHT
+    // * 2，安全起见多一些）。
+    poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT) * 2;
 
     if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &descriptorPool) !=
         VK_SUCCESS) {
@@ -1555,20 +1576,23 @@ private:
   }
 
   std::vector<const char *> getRequiredExtenstions() {
+    Uint32 extensionCount = 0;
 
-    uint32_t glfwExtensionCount = 0;
-    const char **glfwExtensions;
-    glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
-    std::vector<const char *> extensions{glfwExtensions,
-                                         glfwExtensions + glfwExtensionCount};
-
-    if (enableValidationLayers) {
-      extensions.push_back((char *)VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+    // 注意：必须在创建了 SDL_Window 并使用 SDL_WINDOW_VULKAN 标志之后调用
+    const char *const *extensions =
+        SDL_Vulkan_GetInstanceExtensions(&extensionCount);
+    if (!extensions) {
+      throw std::runtime_error(SDL_GetError());
     }
 
-    // extensions.push_back(
-    //     (char *)VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
-    return extensions;
+    // 拷贝到 std::vector 用于 VkInstanceCreateInfo
+    std::vector<const char *> vkExtensions(extensions,
+                                           extensions + extensionCount);
+
+    if (enableValidationLayers) {
+      vkExtensions.push_back((char *)VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+    }
+    return vkExtensions;
   }
 
   SwapChainSupportDetails querySwapChainSupport(VkPhysicalDevice device) {
@@ -1626,7 +1650,11 @@ private:
       return capabilities.currentExtent;
     } else {
       int width, height;
-      glfwGetFramebufferSize(window, &width, &height);
+      // 使用 SDL3 获取像素级 drawable 尺寸
+      if (!SDL_GetWindowSizeInPixels(window, &width, &height)) {
+        throw std::runtime_error(
+            "Failed to query window pixel size for Vulkan");
+      }
 
       VkExtent2D actualExtent = {static_cast<uint32_t>(width),
                                  static_cast<uint32_t>(height)};
@@ -1804,23 +1832,24 @@ private:
   }
 
   void initWindow() {
-    glfwInit();
+    if (!SDL_Init(SDL_INIT_VIDEO)) {
+      throw std::runtime_error(SDL_GetError());
+    }
 
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    // glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+    window = SDL_CreateWindow("RendererVulkanSDL3", WIDTH, HEIGHT,
+                              SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
 
-    window = glfwCreateWindow(WIDTH, HEIGHT, "Vulkan", nullptr, nullptr);
-    glfwSetWindowUserPointer(window, this);
-    glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
-  }
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO &io = ImGui::GetIO();
+    io.ConfigFlags |=
+        ImGuiConfigFlags_NavEnableKeyboard; // Enable Keyboard Controls
+    io.ConfigFlags |=
+        ImGuiConfigFlags_NavEnableGamepad; // Enable Gamepad Controls
 
-  static void framebufferResizeCallback(GLFWwindow *window, int width,
-                                        int height) {
-    // std::cout << "framebuffer resized: " << width << " " << height <<
-    // std::endl;
-    auto app = reinterpret_cast<HelloTriangleApplication *>(
-        glfwGetWindowUserPointer(window));
-    app->framebufferResized = true;
+    if (!ImGui_ImplSDL3_InitForVulkan(window)) {
+      throw std::runtime_error(SDL_GetError());
+    }
   }
 
   void initVulkan() {
@@ -1852,7 +1881,39 @@ private:
     createDescriptorPool();
     createDescriptorSets();
     createSyncObjects();
+
+    initImGui(); // 依赖descriptorPool
   }
+
+  void initImGui() {
+    ImGui_ImplVulkan_InitInfo info{};
+    info.ApiVersion = VK_API_VERSION_1_3;
+    info.Instance = instance;
+    info.PhysicalDevice = physicalDevice;
+    info.Device = device;
+
+    QueueFamilyIndices indices = findQueueFamilies(physicalDevice);
+    info.QueueFamily = indices.graphicsFamily.value();
+    info.Queue = graphicsQueue;
+
+    info.MinImageCount = MAX_FRAMES_IN_FLIGHT;
+    info.ImageCount = MAX_FRAMES_IN_FLIGHT;
+
+    info.DescriptorPool = descriptorPool;
+    info.DescriptorPoolSize = 0; // 0 表示不用 ImGui 自动创建
+    // info.DescriptorPoolSize = dis
+
+    ImGui_ImplVulkan_PipelineInfo pipelineInfoMain{};
+    pipelineInfoMain.RenderPass = renderPass;
+    pipelineInfoMain.Subpass = 0; // 主渲染子通道
+    pipelineInfoMain.MSAASamples = msaaSamples;
+    info.PipelineInfoMain = pipelineInfoMain;
+
+    if (!ImGui_ImplVulkan_Init(&info)) {
+      throw std::runtime_error("failed to initialize ImGui!");
+    }
+  }
+
   void cleanupSyncObjects() {
     for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
       vkDestroySemaphore(device, renderFinishedSemaphores[i], nullptr);
@@ -1898,6 +1959,7 @@ private:
   VkDevice device;
   VkQueue graphicsQueue;
   VkQueue presentQueue;
+  VkQueue computeQueue;
   VkSurfaceKHR surface;
   VkSwapchainKHR swapChain;
   std::vector<VkImage> swapChainImages;
@@ -1959,10 +2021,21 @@ private:
 
   void recreateSwapChain() {
     int width = 0, height = 0;
-    glfwGetFramebufferSize(window, &width, &height);
+
+    // 获取窗口像素尺寸
+    SDL_GetWindowSizeInPixels(window, &width, &height);
+
+    // 如果窗口被最小化，像素尺寸可能为 0，需要等待
+    SDL_Event event;
     while (width == 0 || height == 0) {
-      glfwGetFramebufferSize(window, &width, &height);
-      glfwWaitEvents();
+      // 等待事件
+      if (SDL_WaitEvent(&event)) {
+        if (event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) {
+          SDL_GetWindowSizeInPixels(window, &width, &height);
+        } else if (event.type == SDL_EVENT_QUIT) {
+          return; // 用户关闭窗口
+        }
+      }
     }
 
     vkDeviceWaitIdle(device);
@@ -2057,7 +2130,7 @@ private:
   }
 
   void createSurface() {
-    if (glfwCreateWindowSurface(instance, window, nullptr, &surface) !=
+    if (!SDL_Vulkan_CreateSurface(window, instance, nullptr, &surface) !=
         VK_SUCCESS) {
       throw std::runtime_error("failed to create window surface!");
     }
@@ -2109,6 +2182,9 @@ private:
     vkGetDeviceQueue(device, indices.graphicsFamily.value(), 0, &graphicsQueue);
     // 获取present queue
     vkGetDeviceQueue(device, indices.presentFamily.value(), 0, &presentQueue);
+
+    vkGetDeviceQueue(device, indices.graphicsAndComputeFamily.value(), 0,
+                     &computeQueue);
   }
 
   VkSampleCountFlagBits msaaSamples = VK_SAMPLE_COUNT_1_BIT;
@@ -2202,7 +2278,7 @@ private:
       physicalDevice = bestDevice->device;
       if (GLOBAL_CONTROL_MSAA) {
         msaaSamples = getMaxUsableSampleCount();
-      }else{
+      } else {
         msaaSamples = VK_SAMPLE_COUNT_1_BIT;
       }
       std::cout << "\n Successfully picked best device: "
@@ -2315,8 +2391,12 @@ private:
     // 遍历队列族，查找支持图形和呈现的队列族索引
     int i = 0;
     for (const auto &queueFamily : queueFamilies) {
-      if (queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+      if ((queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT)) {
         indices.graphicsFamily = i;
+      }
+      if ((queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT) &&
+          (queueFamily.queueFlags & VK_QUEUE_COMPUTE_BIT)) {
+        indices.graphicsAndComputeFamily = i;
       }
       VkBool32 presentSupport = false;
       // 因为呈现能力，需要测试：物理设备、队列族索引、呈现表面这三个都需要有。
@@ -2362,35 +2442,60 @@ private:
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
   }
+
+  ImDrawData *drawDataForRenderThread = nullptr;
+  std::mutex drawDataMutex;
+
+  // 控制主循环是否退出
   void mainLoop() {
-    // while (!glfwWindowShouldClose(window)) {
-    //   std::cout << "mainLoop: "<< currentFrame << std::endl;
-    //   // 使用带超时的事件等待，避免完全阻塞
-    //   glfwWaitEventsTimeout(0.016); // 约60Hz，16ms超时
-    //   // glfwPollEvents();
-    //   drawFrame();
-    // }
-
-    // // 等待所有队列完成。防止资源占用中被释放导致的问题。
-    // vkDeviceWaitIdle(device);
-
     // 启动渲染线程
     renderThread =
         std::thread(&HelloTriangleApplication::renderThreadFunc, this);
 
+    SDL_Event event;
     // 主线程专门处理事件
-    while (!glfwWindowShouldClose(window)) {
-      glfwWaitEvents(); // 这里可以安全阻塞
+    while (!shouldClose.load()) {
+      bool uiMayUpdated = false;
+      // 等待事件，如果没有事件会阻塞
+      while (SDL_PollEvent(&event)) {
+        if(ImGui_ImplSDL3_ProcessEvent(&event)){
+          uiMayUpdated = true;
+        }
+        switch (event.type) {
+        case SDL_EVENT_QUIT:
+          shouldClose.store(true);
+          break;
 
-      // 可选：在特定事件时暂停渲染
-      // 比如窗口最小化时
-      int width, height;
-      glfwGetFramebufferSize(window, &width, &height);
+        // SDL3 窗口像素大小变化事件
+        case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+          framebufferResized = true;
+          break;
+
+        default:
+          break;
+        }
+      }
+
+      // 获取窗口当前像素尺寸，决定是否暂停渲染
+      int width = 0, height = 0;
+      if (!SDL_GetWindowSizeInPixels(window, &width, &height)) {
+        throw std::runtime_error("Failed to get window pixel size");
+      }
+      ImGuiIO &io = ImGui::GetIO();
+      io.DisplaySize = ImVec2((float)width, (float)height);
+      if (uiMayUpdated) {
+        std::lock_guard<std::mutex> lock(drawDataMutex);
+        ImGui_ImplVulkan_NewFrame();
+        ImGui::NewFrame();
+        ImGui::ShowDemoWindow(); // 自定义UI
+        ImGui::Render();
+        drawDataForRenderThread = ImGui::GetDrawData();
+      }
       renderPaused.store(width == 0 || height == 0);
+
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 
-    // 清理
-    shouldClose.store(true);
     if (renderThread.joinable()) {
       renderThread.join();
     }
@@ -2566,14 +2671,15 @@ private:
     vkDestroySurfaceKHR(instance, surface, nullptr);
     vkDestroyInstance(instance, nullptr);
 
-    glfwDestroyWindow(window);
+    SDL_DestroyWindow(window);
 
-    glfwTerminate();
+    SDL_Quit();
   }
 };
 
 int main() {
   expSetEnvVK();
+  std::cout << "Hello Triangle!" << std::endl;
 
   HelloTriangleApplication app;
 
@@ -2583,6 +2689,6 @@ int main() {
     std::cerr << e.what() << std::endl;
     return EXIT_FAILURE;
   }
-
+  std::cout << "Goodbye Triangle!" << std::endl;
   return EXIT_SUCCESS;
 }

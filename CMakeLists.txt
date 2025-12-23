@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
-project(VulkanGLFWDemo LANGUAGES C CXX)
+
+# 项目名称
+project(Renderer LANGUAGES C CXX)
 
 # 设定 C++ 20
 set(CMAKE_CXX_STANDARD 20)
@@ -28,20 +30,29 @@ if(NOT Vulkan_FOUND)
 endif()
 
 # -------------------------------
-# GLFW
+# SDL3
 # -------------------------------
-# 使用源码方式构建
-add_subdirectory(external/glfw-3.4)
+set(SDL3_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external/SDL3-3.3.6/cmake)
+# 查找SDL3库
+find_package(SDL3 REQUIRED)
+if(NOT SDL3_FOUND)
+    message(FATAL_ERROR "SDL3 not found")
+endif()
+
+# -------------------------------
+# imgui
+# -------------------------------
+add_subdirectory(external/cmake/imgui)
 
 # -------------------------------
 # 主项目
 # -------------------------------
-set(SOURCES
-    src/main.cpp
-    src/utils.cpp
-)
+
+file(GLOB_RECURSE SOURCES
+ "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
+
 add_executable(${PROJECT_NAME} ${SOURCES})
-target_link_libraries(${PROJECT_NAME} PRIVATE Vulkan::Vulkan glfw)
+target_link_libraries(${PROJECT_NAME} PRIVATE Vulkan::Vulkan imgui)
 target_include_directories(${PROJECT_NAME} PRIVATE include)
 # -------------------------------
 # Windows 特殊：定义宏

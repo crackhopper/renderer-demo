@@ -3,7 +3,7 @@
 # -------------------------------
 set(EXPERIMENTS_TARGETS 
     CreateInstanceTest 
-    InitGLFWTest
+    SDLIntegrationTest
 )
 
 # 用于批量构建的自定义目标
@@ -16,7 +16,7 @@ foreach(TEST_NAME IN LISTS EXPERIMENTS_TARGETS)
     
     # 2. 设置包含目录和链接库
     target_include_directories(${TEST_NAME} PRIVATE ${Vulkan_INCLUDE_DIRS})
-    target_link_libraries(${TEST_NAME} PRIVATE Vulkan::Vulkan glfw)
+    target_link_libraries(${TEST_NAME} PRIVATE Vulkan::Vulkan SDL3::SDL3)
     
     # 3. 设置输出目录到 experiments 子文件夹
     set_target_properties(${TEST_NAME} PROPERTIES 

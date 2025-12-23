@@ -1,4 +1,4 @@
-﻿. ".\scripts\prebuild.ps1"
+﻿. ".\scripts\config-project.ps1"
 
 # 使用cmake的 CompileShaders target 编译 shader
 Write-Host "检查Vulkan SDK..."

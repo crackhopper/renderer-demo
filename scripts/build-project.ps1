@@ -2,12 +2,12 @@
 
 Push-Location $BuildDir
 try {
-    cmake --build . --target BuildExperiments --config Debug
+    cmake --build . --target $ProjectName --config $BuildType
     if ($LASTEXITCODE -eq 0) {
-        Write-Host "Debug编译成功完成!" -ForegroundColor Green
+        Write-Host "$BuildType编译成功完成!" -ForegroundColor Green
         
     } else {
-        Write-Error "Debug编译失败!"
+        Write-Error "$BuildType编译失败!"
         exit $LASTEXITCODE
     }
 }
