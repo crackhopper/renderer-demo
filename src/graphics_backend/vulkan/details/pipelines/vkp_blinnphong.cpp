@@ -3,13 +3,14 @@
 
 namespace LX_core::graphic_backend {
 
-using VertexType = VertexBlinnPhong;
 static VkVertexInputBindingDescription vertexBindingDesc = {
     .binding = 0,
     .stride = sizeof(VertexType),
     .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
 };
-static std::vector<VkVertexInputAttributeDescription> attrDesList = {
+using VertexType = VertexBlinnPhong;
+
+VkVertexInputAttributeDescription attrDesList[] = {
     {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(VertexType, pos)},
     {1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(VertexType, normal)},
     {2, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(VertexType, uv)},
@@ -18,7 +19,8 @@ static std::vector<VkVertexInputAttributeDescription> attrDesList = {
     {5, 0, VK_FORMAT_R32G32B32A32_SINT, offsetof(VertexType, boneIDs)},
     {6, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(VertexType, boneWeights)},
 };
-
+VkPipelineVertexInputStateCreateInfo
+VkVertexInputAttr
 VkPipelineVertexInputStateCreateInfo
 VulkanPipelineBlinnPhong::getVertexInputStateCreateInfo() {
   return {

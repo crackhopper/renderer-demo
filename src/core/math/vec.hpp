@@ -32,6 +32,14 @@ template <typename Derived, typename T, int N> struct VecBase {
     return r;
   }
 
+  // 取反
+  Derived operator-() const {
+    Derived r;
+    for (int i = 0; i < N; i++)
+      r[i] = -(*this)[i]; // 对每个元素取负
+    return r;
+  }
+
   Derived operator*(T s) const {
     Derived r;
     for (int i = 0; i < N; i++)
@@ -139,7 +147,9 @@ template <typename Derived, typename T, int N> struct VecBase {
 template <typename T> struct Vec2 : VecBase<Vec2<T>, T, 2> {
   union {
     T data[2] = {};
-    struct { T x, y; };
+    struct {
+      T x, y;
+    };
   };
   Vec2() = default;
   Vec2(T x, T y) : data{x, y} {}
@@ -148,7 +158,9 @@ template <typename T> struct Vec2 : VecBase<Vec2<T>, T, 2> {
 template <typename T> struct Vec3 : VecBase<Vec3<T>, T, 3> {
   union {
     T data[3] = {};
-    struct { T x, y, z; };
+    struct {
+      T x, y, z;
+    };
   };
   Vec3() = default;
   Vec3(T x, T y, T z) : data{x, y, z} {}
@@ -157,16 +169,16 @@ template <typename T> struct Vec3 : VecBase<Vec3<T>, T, 3> {
   template <typename U = T>
   typename std::enable_if<std::is_floating_point<U>::value, Vec3>::type
   cross(const Vec3 &o) const {
-    return Vec3(y * o.z - z * o.y,
-                z * o.x - x * o.z,
-                x * o.y - y * o.x);
+    return Vec3(y * o.z - z * o.y, z * o.x - x * o.z, x * o.y - y * o.x);
   }
 };
 
 template <typename T> struct Vec4 : VecBase<Vec4<T>, T, 4> {
   union {
     T data[4] = {};
-    struct { T x, y, z, w; };
+    struct {
+      T x, y, z, w;
+    };
   };
   Vec4() = default;
   Vec4(T x, T y, T z, T w) : data{x, y, z, w} {}

@@ -72,6 +72,18 @@ template <typename T> struct Mat4T {
     return r;
   }
 
+  // 就地平移（考虑旋转/缩放）
+  void translateInPlace(const Vec3T<T> &t) {
+    // 列主序: newTranslation = oldTranslation + R * t
+    T tx = m[0][0] * t.x + m[1][0] * t.y + m[2][0] * t.z;
+    T ty = m[0][1] * t.x + m[1][1] * t.y + m[2][1] * t.z;
+    T tz = m[0][2] * t.x + m[1][2] * t.y + m[2][2] * t.z;
+
+    m[3][0] += tx;
+    m[3][1] += ty;
+    m[3][2] += tz;
+  }
+
   // -------------------------
   // Scale
   // -------------------------
