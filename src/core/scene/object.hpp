@@ -1,58 +1,67 @@
 #pragma once
-#include "../math/mat.hpp"
-#include "components/base.hpp"
-#include "components/material.hpp"
-#include "components/mesh.hpp"
-#include "components/skeleton.hpp"
+#include "core/math/mat.hpp"
+#include "core/scene/components/base.hpp"
+#include "core/scene/components/material.hpp"
+#include "core/scene/components/mesh.hpp"
+#include "core/scene/components/skeleton.hpp"
 #include <memory>
 #include <optional>
 #include <vector>
 
 namespace LX_core {
 
+class ObjectPCPtr;
 class IRenderable {
 public:
   virtual ~IRenderable() = default;
   virtual IRenderResourcePtr getVertexBuffer() const = 0;
   virtual IRenderResourcePtr getIndexBuffer() const = 0;
   virtual std::vector<IRenderResourcePtr> getDescriptorResources() const = 0;
-  virtual ShaderPtr getVertexShader() const = 0;
-  virtual ShaderPtr getFragmentShader() const = 0;
   virtual ResourcePassFlag getPassMask() const = 0;
   virtual VertexFormat getVertexFormat() const = 0;
 
-  virtual IRenderResourcePtr getPushConstant() const{
-    return nullptr;
-  }  
+  virtual ShaderPtr getShaderInfo() const = 0;
+  virtual ObjectPCPtr getObjectInfo() const { return nullptr; }
 };
 
 using IRenderablePtr = std::shared_ptr<IRenderable>;
 
 // push constant
-struct alignas(16) ObjectPC : public IRenderResource {
-  ObjectPC(ResourcePassFlag passFlag = ResourcePassFlag::Forward)
-      : passFlag(passFlag) {}
+// 修改后的 ObjectPC 类
+struct ObjectPC : public IRenderResource {
+  // 默认提供最大 128 字节的存储空间，确保兼容所有 Pipeline
+  alignas(16) uint8_t data[128] = {0};
+  uint32_t activeSize = sizeof(PC_Base); // 默认只同步 Model 矩阵
 
-  struct Param {
-    Mat4f model = Mat4f::identity();
-    int enableLighting = 1;
-    int enableSkinning = 0;
-    int padding[2] = {0, 0};
-  };
-  Param param;
+  ObjectPC(ResourcePassFlag passFlag = ResourcePassFlag::Forward)
+      : passFlag(passFlag) {
+    // 初始化时设置默认 model 矩阵
+    PC_Base base;
+    memcpy(data, &base, sizeof(base));
+  }
+
+  // 提供一个模板方法，让材质（Material）能够根据需要更新数据
+  template <typename T> void update(const T &params) {
+    static_assert(sizeof(T) <= 128, "PushConstant block too large!");
+    memcpy(data, &params, sizeof(T));
+    activeSize = sizeof(T);
+  }
 
   virtual ResourcePassFlag getPassFlag() const override { return passFlag; }
   virtual ResourceType getType() const override {
     return ResourceType::PushConstant;
   }
-  virtual const void *getRawData() const override { return &param; }
-  virtual u32 getByteSize() const override { return sizeof(Param); }
+  virtual const void *getRawData() const override { return data; }
+  virtual u32 getByteSize() const override { return activeSize; }
 
 private:
-  ResourcePassFlag passFlag = ResourcePassFlag::Forward;
+  ResourcePassFlag passFlag;
 };
 
 using ObjectPCPtr = std::shared_ptr<ObjectPC>;
+
+template <typename VType>
+using VertexBufferPtr = std::shared_ptr<VertexBuffer<VType>>;
 
 // 渲染子网格，先仅支持1个网格。
 template <typename VType> struct RenderableSubMesh : public IRenderable {
@@ -60,61 +69,39 @@ public:
   MeshPtr<VType> mesh;
   MaterialPtr material;
   std::optional<SkeletonPtr> skeleton;
-  std::optional<ObjectPCPtr> objectPC;
+  ObjectPCPtr objectPC;
 
+  RenderableSubMesh(MeshPtr<VType> mesh, MaterialPtr material)
+      : mesh(mesh), material(material) {
+    objectPC = std::make_shared<ObjectPC>(material->getPassFlag());
+  }
 
-  virtual IRenderResourcePtr getVertexBuffer() const{
-    return mesh->vertexBuffer;
+  virtual IRenderResourcePtr getVertexBuffer() const {
+    return std::dynamic_pointer_cast<IRenderResource>(mesh->vertexBuffer);
   }
-  virtual IRenderResourcePtr getIndexBuffer() const{
-    return mesh->indexBuffer;
+  virtual IRenderResourcePtr getIndexBuffer() const {
+    return std::dynamic_pointer_cast<IRenderResource>(mesh->indexBuffer);
   }
-  virtual std::vector<IRenderResourcePtr> getDescriptorResources() const{
-    auto res=material->getDescriptorResources();
-    std::vector<IRenderResourcePtr> ret{res.begin(),
-                                        res.end()};
+  virtual std::vector<IRenderResourcePtr> getDescriptorResources() const {
+    auto res = material->getDescriptorResources();
+    std::vector<IRenderResourcePtr> ret{res.begin(), res.end()};
     if (skeleton.has_value()) {
-      auto skRes=skeleton.value()->getRenderResources();
-      ret.insert(ret.end(), skRes.begin(),
-                 skRes.end());
+      auto skRes = skeleton.value()->getRenderResources();
+      ret.insert(ret.end(), skRes.begin(), skRes.end());
     }
     return ret;
   }
-  virtual ShaderPtr getVertexShader() const{
-    return material->getVertexShader();
+  virtual ShaderPtr getShaderInfo() const {
+    return material->getShaderInfo();
   }
-  virtual ShaderPtr getFragmentShader() const{
+  virtual ObjectPCPtr getObjectInfo() const {
     return material->getFragmentShader();
   }
-  virtual ResourcePassFlag getPassMask() const{
+  virtual ResourcePassFlag getPassMask() const {
     return material->getPassFlag();
   }
-  virtual VertexFormat getVertexFormat() const{
-    return VType::format();
-  }
+  virtual VertexFormat getVertexFormat() const { return VType::format(); }
 };
 
-// template <typename VertexType> class RenderableMesh {
-// public:
-//   RenderableMesh() = default;
-//   ~RenderableMesh() = default;
-
-//   virtual std::vector<IRenderResourcePtr> getRenderResources() const override {
-//     std::vector<IRenderResourcePtr> ret{objectPC->getRenderResources().begin(),
-//                                         objectPC->getRenderResources().end()};
-//     for (auto &subObject : m_subObjects) {
-//       auto &resources = subObject.getRenderResources();
-//       ret.insert(ret.end(), resources.begin(), resources.end());
-//     }
-//     return ret;
-//   }
-
-// private:
-//   std::vector<RenderableSubMesh<VertexType>> m_subObjects;
-//   ObjectPCPtr objectPC;
-// };
-
-// template <typename VertexType>
-// using RenderableMeshPtr = std::shared_ptr<RenderableMesh<VertexType>>;
 
 } // namespace LX_core

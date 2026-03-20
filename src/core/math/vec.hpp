@@ -1,5 +1,5 @@
 #pragma once
-#include "../platform/types.hpp" // i32, f32, f64
+#include "core/platform/types.hpp" // i32, f32, f64
 #include <cassert>
 #include <cmath>
 #include <type_traits>

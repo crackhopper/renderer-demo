@@ -1,5 +1,5 @@
 #pragma once
-#include "gpu/render_resource.hpp"
+#include "core/gpu/render_resource.hpp"
 #include <algorithm>
 namespace LX_core {
 
@@ -16,6 +16,11 @@ public:
     } else {
       m_minIndex = m_maxIndex = 0;
     }
+  }
+
+  static IndexBufferPtr create(std::vector<u32> &&indices,
+                                ResourcePassFlag passFlag = ResourcePassFlag::Forward) {
+    return std::make_shared<IndexBuffer>(std::move(indices), passFlag);
   }
 
   void update(const std::vector<u32> &indices) {

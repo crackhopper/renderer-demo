@@ -1,19 +1,20 @@
 #pragma once
-#include "../gpu/render_resource.hpp"
-#include "../math/vec.hpp"
+#include "core/gpu/render_resource.hpp"
+#include "core/math/vec.hpp"
 #include "components/base.hpp"
 
 namespace LX_core {
 class LightBase {};
 
-struct alignas(16) DirectionalLightUbo : public IRenderResource {
-  DirectionalLightUbo(ResourcePassFlag passFlag)
+struct alignas(16) DirectionalLightUBO : public IRenderResource {
+  DirectionalLightUBO(ResourcePassFlag passFlag)
     : m_passFlag(passFlag) {}
   struct Param {
     Vec4f dir;
     Vec4f color;
   };
   Param param;
+  static constexpr usize ResourceSize = sizeof(Param);
 
   virtual ResourcePassFlag getPassFlag() const override {
     return m_passFlag;
@@ -25,7 +26,7 @@ struct alignas(16) DirectionalLightUbo : public IRenderResource {
     return &param;
   }
   virtual u32 getByteSize() const override {
-    return sizeof(Param);
+    return ResourceSize;
   }
 
   virtual PipelineSlotId getPipelineSlotId() const override {
@@ -34,12 +35,12 @@ struct alignas(16) DirectionalLightUbo : public IRenderResource {
 private:
   ResourcePassFlag m_passFlag = ResourcePassFlag::Forward;
 };
-using DirectionalLightUboPtr = std::shared_ptr<DirectionalLightUbo>;
+using DirectionalLightUboPtr = std::shared_ptr<DirectionalLightUBO>;
 
 class DirectionalLight : public LightBase, public IComponent {
 public:
   DirectionalLight(ResourcePassFlag passFlag = ResourcePassFlag::Forward)
-    : ubo(std::make_shared<DirectionalLightUbo>(passFlag)) {}
+    : ubo(std::make_shared<DirectionalLightUBO>(passFlag)) {}
   DirectionalLightUboPtr ubo;
   virtual std::vector<IRenderResourcePtr> getRenderResources() const override {
     return {

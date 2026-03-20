@@ -1,7 +1,7 @@
 #pragma once
-#include "../gpu/render_resource.hpp"
-#include "../math/mat.hpp" // 假设你有 Mat4f 定义
-#include "../math/vec.hpp" // Vec3f
+#include "core/gpu/render_resource.hpp"
+#include "core/math/mat.hpp" // 假设你有 Mat4f 定义
+#include "core/math/vec.hpp" // Vec3f
 #include "components/base.hpp"
 #include <memory>
 #include <optional>
@@ -28,8 +28,9 @@ struct alignas(16) CameraUBO : public IRenderResource {
   virtual const void *getRawData() const override {
     return &param;
   }
+  static constexpr usize ResourceSize = sizeof(Param);
   virtual u32 getByteSize() const override {
-    return sizeof(Param);
+    return ResourceSize;
   }
 
   virtual PipelineSlotId getPipelineSlotId() const override {

@@ -31,3 +31,4 @@ enum class GraphicsAPI {
   DirectX = 3,
   Metal = 4,
 };
+

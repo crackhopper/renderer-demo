@@ -7,7 +7,7 @@ file(GLOB_RECURSE CORE_SOURCES
 add_library(${CORE_LIB} ${CORE_SOURCES})
 
 target_include_directories(${CORE_LIB} 
-  INTERFACE
+  PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/..
 )
 

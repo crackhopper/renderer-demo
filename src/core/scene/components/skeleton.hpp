@@ -1,7 +1,7 @@
 #pragma once
-#include "../gpu/render_resource.hpp"
-#include "../math/quat.hpp"
-#include "../math/vec.hpp"
+#include "core/gpu/render_resource.hpp"
+#include "core/math/quat.hpp"
+#include "core/math/vec.hpp"
 #include "base.hpp"
 #include <cassert>
 #include <string>
@@ -18,8 +18,8 @@ struct Bone {
   Vec3f scale = Vec3f(1, 1, 1);
 };
 
-struct alignas(16) SkeletonUbo : public IRenderResource {
-  SkeletonUbo(const std::vector<Bone> &bones, ResourcePassFlag passFlag)
+struct alignas(16) SkeletonUBO : public IRenderResource {
+  SkeletonUBO(const std::vector<Bone> &bones, ResourcePassFlag passFlag)
       : m_passFlag(passFlag) {}
 
   void updateBy(const std::vector<Bone> &bones) {
@@ -67,11 +67,12 @@ struct alignas(16) SkeletonUbo : public IRenderResource {
   virtual ResourceType getType() const override {
     return ResourceType::UniformBuffer;
   }
+  static constexpr u32 ResourceSize = MAX_BONE_COUNT * sizeof(Mat4f);
   virtual const void *getRawData() const override { return m_bones; }
-  virtual u32 getByteSize() const override { return MAX_BONE_COUNT * sizeof(Mat4f); }
+  virtual u32 getByteSize() const override { return ResourceSize; }
   // 默认实现，返回None槽位
   virtual PipelineSlotId getPipelineSlotId() const override {
-    return PipelineSlotId::BoneUBO;
+    return PipelineSlotId::SkeletonUBO;
   }
 
 private:
@@ -79,13 +80,13 @@ private:
   ResourcePassFlag m_passFlag = ResourcePassFlag::Forward;
 };
 
-using SkeletonUboPtr = std::shared_ptr<SkeletonUbo>;
+using SkeletonUboPtr = std::shared_ptr<SkeletonUBO>;
 
 struct Skeleton : public IComponent {
 
   Skeleton(const std::vector<Bone> &bones,
            ResourcePassFlag passFlag = ResourcePassFlag::Forward)
-      : bones(bones), ubo(std::make_shared<SkeletonUbo>(bones, passFlag)) {}
+      : bones(bones), ubo(std::make_shared<SkeletonUBO>(bones, passFlag)) {}
 
   bool addBone(const Bone &bone) {
     if (bones.size() >= MAX_BONE_COUNT) {

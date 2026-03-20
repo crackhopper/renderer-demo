@@ -25,7 +25,7 @@ target_link_libraries(${GRAPHICS_LIB} PRIVATE ${CORE_LIB} ${INFRA_LIB})
 target_include_directories(${GRAPHICS_LIB} PUBLIC ${Vulkan_INCLUDE_DIRS})
 target_link_libraries(${GRAPHICS_LIB} PUBLIC Vulkan::Vulkan)
 
-target_include_directories(${GRAPHICS_LIB} INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/..)
+target_include_directories(${GRAPHICS_LIB} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)
 
 
 if(USE_GEOMETRY_SHADER)

@@ -1,6 +1,6 @@
 #pragma once
-#include "../gpu/render_resource.hpp"
-#include "../platform/types.hpp"
+#include "core/gpu/render_resource.hpp"
+#include "core/platform/types.hpp"
 #include <memory>
 #include <string>
 #include <vector>

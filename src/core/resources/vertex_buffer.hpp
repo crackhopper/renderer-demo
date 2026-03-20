@@ -1,5 +1,5 @@
 #pragma once
-#include "../math/vec.hpp"
+#include "core/math/vec.hpp"
 #include <array>
 #include <functional>
 #include <string>
@@ -14,6 +14,7 @@ enum class VertexFormat {
   NormalTangent,
   BoneWeight,
   PosNormalUvBone,
+  Custom, // 自定义，需要用户自己重载pipeline中的getVertexInputStateCreateInfo方法
 };
 
 template <typename Derived> struct VertexBase {
@@ -133,13 +134,19 @@ public:
   static VertexFormat getVertexFormat() { return VType::format(); }
 
   VertexFormat getFormat() const { return VType::format(); }
+
+  static VertexBufferPtr create(std::vector<VType> &&vertices,
+                                ResourcePassFlag passFlag = ResourcePassFlag::Forward) {
+    return std::make_shared<VertexBuffer>(std::move(vertices), passFlag);
+  }
+  static VertexBufferPtr create(std::initializer_list<VType> list,
+                                ResourcePassFlag passFlag = ResourcePassFlag::Forward) {
+    return std::make_shared<VertexBuffer>(list, passFlag);
+  }
 private:
   std::vector<VType> m_vertices;
   ResourcePassFlag m_passFlag = ResourcePassFlag::Forward;
 };
 
-
-template <typename VType>
-using VertexBufferPtr = std::shared_ptr<VertexBuffer<VType>>;
 
 } // namespace LX_core

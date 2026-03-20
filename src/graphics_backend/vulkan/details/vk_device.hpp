@@ -1,120 +1,95 @@
 #pragma once
-
 #include <memory>
 #include <vector>
 #include <vulkan/vulkan.h>
 
 namespace LX_core::graphic_backend {
 
-// 前置声明，方便在 Pool 中直接提供创建 CommandBuffer 的快捷方法
-class VulkanCommandBuffer;
-class VulkanDevice;
-class VulkanCommandPool;
-class VulkanDescriptorAllocator;
+// 前置声明
+class VulkanDescriptorManager;
+class VulkanCommandBufferManager;
 
-using VulkanDevicePtr = std::unique_ptr<VulkanDevice>;
-using VulkanCommandPoolPtr = std::unique_ptr<VulkanCommandPool>;
-using VulkanCommandBufferPtr = std::unique_ptr<VulkanCommandBuffer>;
-using VulkanDescriptorAllocatorPtr = std::unique_ptr<VulkanDescriptorAllocator>;
-
-
-class VulkanCommandPool {
-  struct Token {};
-
-public:
-  /**
-   * @brief 构造函数
-   * @param queueFamilyIndex 该池所属的队列族索引（例如 Graphics 队列）
-   * @param flags 常用标志位：
-   * VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT (允许单独重置录制中的
-   * Buffer) VK_COMMAND_POOL_CREATE_TRANSIENT_BIT (用于寿命极短的 Buffer)
-   */
-  VulkanCommandPool(Token, VkDevice device, uint32_t queueFamilyIndex,
-                    VkCommandPoolCreateFlags flags =
-                        VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
-  virtual ~VulkanCommandPool(); // 启用 RTTI
-
-  // 禁用拷贝
-  VulkanCommandPool(const VulkanCommandPool &) = delete;
-  VulkanCommandPool &operator=(const VulkanCommandPool &) = delete;
-
-  // 核心操作
-  void reset(VkCommandPoolResetFlags flags = 0);
-
-  // 获取原始句柄
-  VkCommandPool getHandle() const { return _handle; }
-
-  static std::unique_ptr<VulkanCommandPool> create(VkDevice device,
-                                                   uint32_t index) {
-    // 类内部可以创建 Token
-    return std::make_unique<VulkanCommandPool>(Token{}, device, index);
-  }
-
-protected:
-  VkDevice device = VK_NULL_HANDLE;
-  VkCommandPool _handle{VK_NULL_HANDLE};
-};
-
+/**
+ * @brief Vulkan 逻辑设备包装类
+ * 负责物理设备选择、逻辑设备创建、全局队列获取以及核心管理器的生命周期。
+ */
 class VulkanDevice {
   struct Token {};
 
 public:
-  VulkanDevice(Token) {}
-  VulkanDevice() = default;
+  // 强制通过工厂方法创建
+  explicit VulkanDevice(Token);
   ~VulkanDevice();
 
-  static VulkanDevicePtr create() {
-    auto ptr = std::make_unique<VulkanDevice>(Token{});
-    ptr->initialize();
-    return ptr;
+  static std::unique_ptr<VulkanDevice> create() {
+    return std::make_unique<VulkanDevice>(Token{});
   }
 
+  // --- 生命周期 ---
   void initialize();
   void shutdown();
 
-  VkDevice getDevice() const { return device; }
-  VkPhysicalDevice getPhysicalDevice() const { return physicalDevice; }
-  VkQueue getGraphicsQueue() const { return graphicsQueue; }
+  // --- 句柄获取 (只读) ---
+  VkDevice getHandle() const { return m_device; }
+  VkPhysicalDevice getPhysicalDevice() const { return m_physicalDevice; }
+  VkInstance getInstance() const { return m_instance; }
+  VkQueue getGraphicsQueue() const { return m_graphicsQueue; }
+  VkQueue getPresentQueue() const { return m_presentQueue; }
 
   uint32_t getGraphicsQueueFamilyIndex() const {
-    return graphicsQueueFamilyIndex;
+    return m_graphicsQueueFamilyIndex;
+  }
+  uint32_t getPresentQueueFamilyIndex() const {
+    return m_presentQueueFamilyIndex;
   }
 
-  VkInstance getInstance() const { return instance; }
-  VkDevice getHandle() const { return device; }
-  VkCommandPool getCommandPool() const { return mp_graphicsCmdPool ? mp_graphicsCmdPool->getHandle() : VK_NULL_HANDLE; }
+  // --- 核心管理器访问 ---
 
+  /**
+   * @brief 描述符管理器：负责全局 Layout 缓存和每帧 Set 分配
+   */
+  VulkanDescriptorManager &getDescriptorManager() {
+    return *m_descriptorManager;
+  }
+
+  // --- 实用工具 ---
+
+  /**
+   * @brief 查找内存类型索引 (用于 Buffer/Image 分配)
+   */
   uint32_t findMemoryTypeIndex(uint32_t typeFilter,
-                          VkMemoryPropertyFlags properties);
+                               VkMemoryPropertyFlags properties) const;
 
-  //----------------------- 资源创建相关 -----------------------
-  // 注意： VulkanCommandBuffer 会自动管理生命周期。
-  VulkanCommandBufferPtr
-  newCmdBuffer(VkCommandBufferUsageFlags usage,
-               VkCommandBufferLevel level = VK_COMMAND_BUFFER_LEVEL_PRIMARY);
-
-  VulkanDescriptorAllocator &getDescriptorAllocator() {
-    return *pDescriptorAllocator;
-  }               
+  /**
+   * @brief 辅助函数：等待设备空闲（通常在 shutdown 或重建 Swapchain 前调用）
+   */
+  void waitIdle() const { vkDeviceWaitIdle(m_device); }
 
 private:
-  // 内部初始化函数
+  // 内部初始化流程
   void createInstance();
   void pickPhysicalDevice();
   void createLogicalDevice();
-  void createCommandPool();
 
 private:
-  VulkanCommandPoolPtr mp_graphicsCmdPool;
-  VulkanDescriptorAllocatorPtr pDescriptorAllocator;
+  // 管理器：由 Device 持有，因为它们的生命周期与 Device 一致
+  std::unique_ptr<VulkanDescriptorManager> m_descriptorManager;
 
-  VkInstance instance = VK_NULL_HANDLE;
-  VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
-  VkDevice device = VK_NULL_HANDLE;
-  VkQueue graphicsQueue = VK_NULL_HANDLE;
+  // Vulkan 核心句柄
+  VkInstance m_instance = VK_NULL_HANDLE;
+  VkPhysicalDevice m_physicalDevice = VK_NULL_HANDLE;
+  VkDevice m_device = VK_NULL_HANDLE;
 
-  // 可扩展：队列族索引
-  uint32_t graphicsQueueFamilyIndex = 0;
+  // 队列
+  VkQueue m_graphicsQueue = VK_NULL_HANDLE;
+  VkQueue m_presentQueue = VK_NULL_HANDLE;
+  uint32_t m_graphicsQueueFamilyIndex = 0;
+  uint32_t m_presentQueueFamilyIndex = 0;
+
+  // 调试层
+  VkDebugUtilsMessengerEXT m_debugMessenger = VK_NULL_HANDLE;
 };
+
+using VulkanDevicePtr = std::unique_ptr<VulkanDevice>;
 
 } // namespace LX_core::graphic_backend

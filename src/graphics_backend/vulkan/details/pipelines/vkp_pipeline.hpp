@@ -5,18 +5,24 @@
  *
  * 从这个基类，我们会构造若干个通用的pipeline子类。
  *
- * TODO: 重构中....
  */
 
+#include "core/resources/vertex_buffer.hpp"
+#include "vkp_pipeline_slot.hpp"
 #include <memory>
 #include <string>
 #include <vector>
 #include <vulkan/vulkan.h>
 
-#include "../vk_device.hpp"
-
 namespace LX_core::graphic_backend {
 
+class VulkanDevice;
+
+struct PushConstantDetails {
+  VkShaderStageFlags stageFlags;
+  uint32_t offset;
+  uint32_t size;
+};
 
 class VulkanPipelineBase;
 using VulkanPipelinePtr = std::unique_ptr<VulkanPipelineBase>;
@@ -25,20 +31,31 @@ protected:
   struct Token {};
 
 public:
-  explicit VulkanPipelineBase(Token, VulkanDevice &device, VkExtent2D extent);
+  explicit VulkanPipelineBase(Token, VulkanDevice &device, VkExtent2D extent,
+                              const std::string &shaderName_,
+                              PipelineSlotDetails *slots_, uint32_t slotCount_,
+                              const PushConstantDetails &pushConstants_);
   ~VulkanPipelineBase();
 
-  static VulkanPipelinePtr create(VulkanDevice &device, VkExtent2D extent) {
-    auto p = std::make_unique<VulkanPipelineBase>(Token{}, device, extent);
-    p->initLayoutAndShader();
+  static VulkanPipelinePtr create(VulkanDevice &device, VkExtent2D extent,
+                                  const std::string &shaderName_,
+                                  PipelineSlotDetails *slots,
+                                  uint32_t slotCount) {
+    auto p = std::make_unique<VulkanPipelineBase>(
+        Token{}, device, extent, shaderName_, slots, slotCount);
+    p->loadShaders();
+    p->createLayout();
     return p;
   }
 
-  virtual void initLayoutAndShader() = 0;
   virtual std::string getPipelineId() const = 0;
-  virtual VkPipelineVertexInputStateCreateInfo
-  getVertexInputStateCreateInfo() = 0;
+  virtual std::string getShaderName() const = 0;
+  virtual VertexFormat getVertexFormat() const = 0;
 
+  virtual void loadShaders();
+  virtual void createLayout();
+
+  virtual VkPipelineVertexInputStateCreateInfo getVertexInputStateCreateInfo();
   virtual VkPipelineInputAssemblyStateCreateInfo
   getInputAssemblyStateCreateInfo();
   virtual VkPipelineShaderStageCreateInfo getVertexShaderStageCreateInfo();
@@ -54,12 +71,17 @@ public:
   VkPipeline buildGraphicsPpl(VkRenderPass renderPass);
 
   VkPipeline getPipelineHandle() const { return hPipeline; }
-  VkPipelineLayout getLayoutHandle() const { return hLayout; }
 
 protected:
+  VulkanDevice &device;
   VkDevice hDevice = VK_NULL_HANDLE;
   VkPipeline hPipeline = VK_NULL_HANDLE;
   VkPipelineLayout hLayout = VK_NULL_HANDLE;
+
+  std::string shaderName;
+  std::vector<PipelineSlotDetails> slots;
+  PushConstantDetails pushConstants;
+
   VkShaderModule hVertShader = VK_NULL_HANDLE;
   VkShaderModule hFragShader = VK_NULL_HANDLE;
 
@@ -69,6 +91,9 @@ protected:
 
   // 多重采样
   VkSampleCountFlagBits msaaSamples = VK_SAMPLE_COUNT_1_BIT;
+
+  std::vector<VkVertexInputBindingDescription> m_viBindingDescriptions;
+  std::vector<VkVertexInputAttributeDescription> m_viAttrDescriptions;
 };
 
 } // namespace LX_core::graphic_backend

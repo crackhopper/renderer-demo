@@ -1,6 +1,6 @@
 #pragma once
-#include "../platform/types.hpp"
-#include "vec.hpp"
+#include "core/platform/types.hpp"
+#include "core/math/vec.hpp"
 #include <cassert>
 #include <cmath>
 

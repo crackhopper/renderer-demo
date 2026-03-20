@@ -1,19 +1,21 @@
 #pragma once
-#include "camera.hpp"
-#include "light.hpp"
-#include "object.hpp"
+#include "core/scene/camera.hpp"
+#include "core/scene/light.hpp"
+#include "core/scene/object.hpp"
 
 namespace LX_core {
 
 // 简化 RenderItem
 struct RenderItem {
-  IRenderResourcePtr vertexBuffer;
+  ShaderPtr shaderInfo;
+
+  ObjectPCPtr objectInfo;
   VertexFormat vertexFormat;
+  IRenderResourcePtr vertexBuffer;
   IRenderResourcePtr indexBuffer;
-  IRenderResourcePtr pushConstant;
+  
   std::vector<IRenderResourcePtr> descriptorResources; // 材质 + skeleton 等资源
-  ShaderPtr vertexShader;
-  ShaderPtr fragmentShader;
+  
   ResourcePassFlag passMask;
 };
 
@@ -25,7 +27,14 @@ public:
   CameraPtr camera;
   DirectionalLightPtr directionalLight;
 
-  Scene() = default;
+  Scene(IRenderablePtr mesh) : mesh(mesh) {
+    camera = std::make_shared<Camera>();
+    directionalLight = std::make_shared<DirectionalLight>();
+  }
+
+  static ScenePtr create(IRenderablePtr mesh) {
+    return std::make_shared<Scene>(mesh);
+  }
 
   // 构建 RenderItem 的接口
   RenderItem buildRenderItem() {
@@ -33,10 +42,9 @@ public:
     item.vertexBuffer = mesh->getVertexBuffer();
     item.vertexFormat = mesh->getVertexFormat();
     item.indexBuffer = mesh->getIndexBuffer();
-    item.pushConstant = mesh->getPushConstant();
+    item.objectInfo = mesh->getObjectInfo();
     item.descriptorResources = mesh->getDescriptorResources();
-    item.vertexShader = mesh->getVertexShader();
-    item.fragmentShader = mesh->getFragmentShader();
+    item.shaderInfo = mesh->getShaderInfo();
     item.passMask = mesh->getPassMask();
     return item;
   }

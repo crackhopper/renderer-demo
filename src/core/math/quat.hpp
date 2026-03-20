@@ -1,6 +1,6 @@
 #pragma once
-#include "mat.hpp"
-#include "vec.hpp"
+#include "core/math/mat.hpp"
+#include "core/math/vec.hpp"
 #include <cassert>
 #include <cmath>
 

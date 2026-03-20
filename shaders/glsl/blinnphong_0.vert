@@ -3,7 +3,7 @@
 layout(push_constant) uniform ObjectPC {
     mat4 model;
     int  enableLighting;
-    int  enableSkinning;
+    int  enableSkinning; // 开启蒙皮
     int  padding[2];
 } object;
 
@@ -45,6 +45,7 @@ void main() {
     vec4 worldPos = finalModel * vec4(inPosition, 1.0);
     
     gl_Position = camera.proj * camera.view * worldPos;
+    // NDC_coord = proj * view * model (skin) * pos
     vWorldPos = worldPos.xyz;
     vUV = inUV;
 

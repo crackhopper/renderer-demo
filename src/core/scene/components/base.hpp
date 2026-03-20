@@ -1,5 +1,5 @@
 #pragma once
-#include "../../gpu/render_resource.hpp"
+#include "core/gpu/render_resource.hpp"
 #include <memory>
 #include <vector>
 

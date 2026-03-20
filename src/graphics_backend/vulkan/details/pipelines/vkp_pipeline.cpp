@@ -1,13 +1,45 @@
-#include "vkp_base.hpp"
+#include "vkp_pipeline.hpp"
 
+#include "../vk_device.hpp"
+#include "../descriptors/vkd_descriptor_manager.hpp"
 #include <fstream>
 
 namespace LX_core::graphic_backend {
 
-VulkanPipelineBase::VulkanPipelineBase(Token t, VulkanDevice &device, VkExtent2D extent)
-    : hDevice(device.getHandle()), extent(extent) {}
+// 辅助函数：读取二进制文件
+static std::vector<char> readFile(const std::string &filename) {
+  std::ifstream file(filename, std::ios::ate | std::ios::binary);
+  if (!file.is_open())
+    throw std::runtime_error("failed to open file: " + filename);
+  size_t fileSize = (size_t)file.tellg();
+  std::vector<char> buffer(fileSize);
+  file.seekg(0);
+  file.read(buffer.data(), fileSize);
+  file.close();
+  return buffer;
+}
+
+VulkanPipelineBase::VulkanPipelineBase(
+    Token token, VulkanDevice &device, VkExtent2D extent,
+    const std::string &shaderName_, PipelineSlotDetails *slots_,
+    uint32_t slotCount_, const PushConstantDetails &pushConstants_)
+    : device(device), hDevice(device.getHandle()), extent(extent),
+      shaderName(shaderName_), slots(slots_, slots_ + slotCount_),
+      pushConstants(pushConstants_) {}
 
 VulkanPipelineBase::~VulkanPipelineBase() {
+  if (hVertShader)
+    vkDestroyShaderModule(hDevice, hVertShader, nullptr);
+  hVertShader = VK_NULL_HANDLE;
+
+  if (hFragShader)
+    vkDestroyShaderModule(hDevice, hFragShader, nullptr);
+  hFragShader = VK_NULL_HANDLE;
+
+  if (hLayout)
+    vkDestroyPipelineLayout(hDevice, hLayout, nullptr);
+  hLayout = VK_NULL_HANDLE;
+
   if (hPipeline)
     vkDestroyPipeline(hDevice, hPipeline, nullptr);
   hPipeline = VK_NULL_HANDLE;
@@ -71,8 +103,6 @@ VulkanPipelineBase::getViewportStateCreateInfo() {
 
   return viewportState;
 }
-
-
 
 VkPipelineDynamicStateCreateInfo
 VulkanPipelineBase::getDynamicStateCreateInfo() {
@@ -174,6 +204,103 @@ VulkanPipelineBase::getColorBlendStateCreateInfo() {
   return colorBlending;
 }
 
+VkPipelineVertexInputStateCreateInfo
+VulkanPipelineBase::getVertexInputStateCreateInfo() {
+  VertexFormat format = getVertexFormat(); // 假设子类通过此函数返回格式
+
+  // 清空旧数据
+  m_viBindingDescriptions.clear();
+  m_viAttrDescriptions.clear();
+
+  if (format == VertexFormat::Custom) {
+    // 交由子类自行填充 bindingDescriptions 和 attributeDescriptions
+    return {};
+  }
+
+  // 1. 定义 Binding (Slot 0)
+  VkVertexInputBindingDescription binding{};
+  binding.binding = 0;
+  binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+  // 根据格式确定 stride
+  uint32_t stride = 0;
+
+  // 2. 定义 Attributes
+  auto addAttr = [&](uint32_t loc, VkFormat vkFormat, uint32_t offset) {
+    VkVertexInputAttributeDescription attr{};
+    attr.binding = 0;
+    attr.location = loc;
+    attr.format = vkFormat;
+    attr.offset = offset;
+    m_viAttrDescriptions.push_back(attr);
+  };
+
+  switch (format) {
+  case VertexFormat::Pos:
+    stride = sizeof(VertexPos);
+    addAttr(0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(VertexPos, pos));
+    break;
+
+  case VertexFormat::PosColor:
+    stride = sizeof(VertexPosColor);
+    addAttr(0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(VertexPosColor, pos));
+    addAttr(1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(VertexPosColor, color));
+    break;
+
+  case VertexFormat::PosUV:
+    stride = sizeof(VertexPosUV);
+    addAttr(0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(VertexPosUV, pos));
+    addAttr(1, VK_FORMAT_R32G32_SFLOAT, offsetof(VertexPosUV, uv));
+    break;
+
+  case VertexFormat::NormalTangent:
+    stride = sizeof(VertexNormalTangent);
+    addAttr(0, VK_FORMAT_R32G32B32_SFLOAT,
+            offsetof(VertexNormalTangent, normal));
+    addAttr(1, VK_FORMAT_R32G32B32A32_SFLOAT,
+            offsetof(VertexNormalTangent, tangent));
+    break;
+
+  case VertexFormat::BoneWeight:
+    stride = sizeof(VertexBoneWeight);
+    addAttr(0, VK_FORMAT_R32G32B32A32_SINT,
+            offsetof(VertexBoneWeight, boneIds));
+    addAttr(1, VK_FORMAT_R32G32B32A32_SFLOAT,
+            offsetof(VertexBoneWeight, weights));
+    break;
+
+  case VertexFormat::PosNormalUvBone:
+    stride = sizeof(VertexPosNormalUvBone);
+    addAttr(0, VK_FORMAT_R32G32B32_SFLOAT,
+            offsetof(VertexPosNormalUvBone, pos));
+    addAttr(1, VK_FORMAT_R32G32B32_SFLOAT,
+            offsetof(VertexPosNormalUvBone, normal));
+    addAttr(2, VK_FORMAT_R32G32_SFLOAT, offsetof(VertexPosNormalUvBone, uv));
+    addAttr(3, VK_FORMAT_R32G32B32A32_SFLOAT,
+            offsetof(VertexPosNormalUvBone, tangent));
+    addAttr(4, VK_FORMAT_R32G32B32A32_SINT,
+            offsetof(VertexPosNormalUvBone, boneIDs));
+    addAttr(5, VK_FORMAT_R32G32B32A32_SFLOAT,
+            offsetof(VertexPosNormalUvBone, boneWeights));
+    break;
+  }
+
+  binding.stride = stride;
+  m_viBindingDescriptions.push_back(binding);
+
+  // 3. 装填 CreateInfo
+  VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
+  vertexInputInfo.sType =
+      VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+  vertexInputInfo.vertexBindingDescriptionCount =
+      static_cast<uint32_t>(m_viBindingDescriptions.size());
+  vertexInputInfo.pVertexBindingDescriptions = m_viBindingDescriptions.data();
+  vertexInputInfo.vertexAttributeDescriptionCount =
+      static_cast<uint32_t>(m_viAttrDescriptions.size());
+  vertexInputInfo.pVertexAttributeDescriptions = m_viAttrDescriptions.data();
+
+  return vertexInputInfo;
+}
+
 VkPipeline VulkanPipelineBase::buildGraphicsPpl(VkRenderPass renderPass) {
   // shader信息
   VkPipelineShaderStageCreateInfo stages[2]{};
@@ -189,7 +316,8 @@ VkPipeline VulkanPipelineBase::buildGraphicsPpl(VkRenderPass renderPass) {
       getInputAssemblyStateCreateInfo();
 
   // viewport and scissor
-  VkPipelineViewportStateCreateInfo viewportState = getViewportStateCreateInfo();
+  VkPipelineViewportStateCreateInfo viewportState =
+      getViewportStateCreateInfo();
 
   // 动态参数
   VkPipelineDynamicStateCreateInfo dynamicState = getDynamicStateCreateInfo();
@@ -224,12 +352,12 @@ VkPipeline VulkanPipelineBase::buildGraphicsPpl(VkRenderPass renderPass) {
   pipelineInfo.pDepthStencilState = &depthStencil; // Optional
   pipelineInfo.pColorBlendState = &colorBlending;
 
-  pipelineInfo.layout = getLayoutHandle();
+  pipelineInfo.layout = hLayout;
 
   // 绑定 render pass （用来指定渲染目标和附件）
   // 需要 renderpass 兼容当前的pipeline
   pipelineInfo.renderPass = renderPass;
-  pipelineInfo.subpass = 0; 
+  pipelineInfo.subpass = 0;
   // 绑定 base pipeline （可选，用来继承之前的 pipeline 配置）
   pipelineInfo.basePipelineHandle = VK_NULL_HANDLE; // Optional
   pipelineInfo.basePipelineIndex = -1;              // Optional
@@ -239,6 +367,72 @@ VkPipeline VulkanPipelineBase::buildGraphicsPpl(VkRenderPass renderPass) {
     throw std::runtime_error("failed to create graphics pipeline!");
   }
   return hPipeline;
+}
+
+void VulkanPipelineBase::loadShaders() {
+  // 假设你的 Shader 命名规则是 shaderName.vert.spv 和 shaderName.frag.spv
+  auto vertCode = readFile("shaders/bin/" + shaderName + ".vert.spv");
+  auto fragCode = readFile("shaders/bin/" + shaderName + ".frag.spv");
+
+  auto createModule = [this](const std::vector<char> &code) {
+    VkShaderModuleCreateInfo createInfo{
+        VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
+    createInfo.codeSize = code.size();
+    createInfo.pCode = reinterpret_cast<const uint32_t *>(code.data());
+    VkShaderModule module;
+    if (vkCreateShaderModule(hDevice, &createInfo, nullptr, &module) !=
+        VK_SUCCESS) {
+      throw std::runtime_error("failed to create shader module!");
+    }
+    return module;
+  };
+
+  hVertShader = createModule(vertCode);
+  hFragShader = createModule(fragCode);
+}
+
+void VulkanPipelineBase::createLayout() {
+  // 1. 获取 DescriptorManager 实例
+  // VulkanDevice 中持有 VulkanDevice 中持有管理器的引用
+  auto &descriptorMgr = device.getDescriptorManager();
+
+  // 2. 将 slots 按 setIndex 分组
+  // 因为一个 PipelineLayout 可能包含多个 DescriptorSetLayout (Set 0, Set 1...)
+  std::unordered_map<uint32_t, std::vector<PipelineSlotDetails>> setGroups;
+  for (const auto &slot : slots) {
+    setGroups[slot.setIndex].push_back(slot);
+  }
+
+  // 3. 为每个 SetIndex 获取对应的 VkDescriptorSetLayout
+  std::vector<VkDescriptorSetLayout> setLayouts;
+  // 排序确保 Set 的顺序是 0, 1, 2...
+  for (uint32_t i = 0; i < setGroups.size(); ++i) {
+    setLayouts.push_back(descriptorMgr.getOrCreateLayout(setGroups[i]));
+  }
+
+  // 4. 处理 Push Constant
+
+  // 5. 创建 Pipeline Layout
+  VkPipelineLayoutCreateInfo pipelineLayoutInfo{
+      VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+  pipelineLayoutInfo.setLayoutCount = static_cast<uint32_t>(setLayouts.size());
+  pipelineLayoutInfo.pSetLayouts = setLayouts.data();
+  if (pushConstants.size > 0) {
+    VkPushConstantRange range{};
+    range.stageFlags = pushConstants.stageFlags;
+    range.offset = pushConstants.offset;
+    range.size = pushConstants.size;
+    pipelineLayoutInfo.pushConstantRangeCount = 1;
+    pipelineLayoutInfo.pPushConstantRanges = &range;
+  } else {
+    pipelineLayoutInfo.pushConstantRangeCount = 0;
+    pipelineLayoutInfo.pPushConstantRanges = nullptr;
+  }
+
+  if (vkCreatePipelineLayout(hDevice, &pipelineLayoutInfo, nullptr, &hLayout) !=
+      VK_SUCCESS) {
+    throw std::runtime_error("failed to create pipeline layout!");
+  }
 }
 
 } // namespace LX_core::graphic_backend
