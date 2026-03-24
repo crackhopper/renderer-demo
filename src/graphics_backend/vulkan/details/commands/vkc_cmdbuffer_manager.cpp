@@ -8,7 +8,7 @@ namespace graphic_backend {
 VulkanCommandBufferManager::VulkanCommandBufferManager(Token, VulkanDevice &device,
                                                       uint32_t maxFramesInFlight,
                                                       uint32_t queueFamilyIndex)
-    : m_device(&device), m_maxFramesInFlight(maxFramesInFlight),
+    : m_device(device), m_maxFramesInFlight(maxFramesInFlight),
       m_queueFamilyIndex(queueFamilyIndex) {
   m_frameContexts.resize(maxFramesInFlight);
 
@@ -19,8 +19,7 @@ VulkanCommandBufferManager::VulkanCommandBufferManager(Token, VulkanDevice &devi
 }
 
 VulkanCommandBufferManager::~VulkanCommandBufferManager() {
-  if (m_device == nullptr) return;
-  VkDevice device = m_device->getLogicalDevice();
+  VkDevice device = m_device.getLogicalDevice();
 
   for (size_t i = 0; i < m_frameContexts.size(); ++i) {
     if (m_frameContexts[i].pool != VK_NULL_HANDLE) {
@@ -41,7 +40,7 @@ void VulkanCommandBufferManager::createPool(VkCommandPool &pool, VkCommandPoolCr
   poolInfo.flags = flags;
   poolInfo.queueFamilyIndex = m_queueFamilyIndex;
 
-  if (vkCreateCommandPool(m_device->getLogicalDevice(), &poolInfo, nullptr, &pool) != VK_SUCCESS) {
+  if (vkCreateCommandPool(m_device.getLogicalDevice(), &poolInfo, nullptr, &pool) != VK_SUCCESS) {
     throw std::runtime_error("Failed to create command pool!");
   }
 }
@@ -50,18 +49,18 @@ void VulkanCommandBufferManager::beginFrame(uint32_t currentFrameIndex) {
   m_currentFrameIndex = currentFrameIndex;
 
   CommandFrameContext &frame = m_frameContexts[currentFrameIndex];
-  vkResetCommandPool(m_device->getLogicalDevice(), frame.pool, 0);
+  vkResetCommandPool(m_device.getLogicalDevice(), frame.pool, 0);
   frame.activeBuffers.clear();
   frame.nextAvailableBuffer = 0;
 }
 
-VulkanCommandBuffer VulkanCommandBufferManager::allocateBuffer(VkCommandBufferLevel level) {
+VulkanCommandBufferPtr VulkanCommandBufferManager::allocateBuffer(VkCommandBufferLevel level) {
   CommandFrameContext &frame = m_frameContexts[m_currentFrameIndex];
 
   if (frame.nextAvailableBuffer < frame.activeBuffers.size()) {
     VkCommandBuffer buffer = frame.activeBuffers[frame.nextAvailableBuffer++];
     vkResetCommandBuffer(buffer, 0);
-    return VulkanCommandBuffer(buffer, *m_device);
+    return std::make_unique<VulkanCommandBuffer>(buffer, m_device);
   }
 
   VkCommandBufferAllocateInfo allocInfo{};
@@ -71,16 +70,16 @@ VulkanCommandBuffer VulkanCommandBufferManager::allocateBuffer(VkCommandBufferLe
   allocInfo.commandBufferCount = 1;
 
   VkCommandBuffer buffer;
-  if (vkAllocateCommandBuffers(m_device->getLogicalDevice(), &allocInfo, &buffer) != VK_SUCCESS) {
+  if (vkAllocateCommandBuffers(m_device.getLogicalDevice(), &allocInfo, &buffer) != VK_SUCCESS) {
     throw std::runtime_error("Failed to allocate command buffer!");
   }
 
   frame.activeBuffers.push_back(buffer);
   frame.nextAvailableBuffer++;
-  return VulkanCommandBuffer(buffer, *m_device);
+  return std::make_unique<VulkanCommandBuffer>(buffer, m_device);
 }
 
-VulkanCommandBuffer VulkanCommandBufferManager::beginSingleTimeCommands() {
+VulkanCommandBufferPtr VulkanCommandBufferManager::beginSingleTimeCommands() {
   VkCommandBufferAllocateInfo allocInfo{};
   allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
   allocInfo.commandPool = m_transientPool;
@@ -88,7 +87,7 @@ VulkanCommandBuffer VulkanCommandBufferManager::beginSingleTimeCommands() {
   allocInfo.commandBufferCount = 1;
 
   VkCommandBuffer buffer;
-  if (vkAllocateCommandBuffers(m_device->getLogicalDevice(), &allocInfo, &buffer) != VK_SUCCESS) {
+  if (vkAllocateCommandBuffers(m_device.getLogicalDevice(), &allocInfo, &buffer) != VK_SUCCESS) {
     throw std::runtime_error("Failed to allocate transient command buffer!");
   }
 
@@ -97,11 +96,11 @@ VulkanCommandBuffer VulkanCommandBufferManager::beginSingleTimeCommands() {
   beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
   vkBeginCommandBuffer(buffer, &beginInfo);
-  return VulkanCommandBuffer(buffer, *m_device);
+  return std::make_unique<VulkanCommandBuffer>(buffer, m_device);
 }
 
-void VulkanCommandBufferManager::endSingleTimeCommands(VulkanCommandBuffer commandBuffer, VkQueue queue) {
-  VkCommandBuffer handle = commandBuffer.getHandle();
+void VulkanCommandBufferManager::endSingleTimeCommands(VulkanCommandBufferPtr commandBuffer, VkQueue queue) {
+  VkCommandBuffer handle = commandBuffer->getHandle();
   vkEndCommandBuffer(handle);
 
   VkSubmitInfo submitInfo{};
@@ -112,7 +111,7 @@ void VulkanCommandBufferManager::endSingleTimeCommands(VulkanCommandBuffer comma
   vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
   vkQueueWaitIdle(queue);
 
-  vkFreeCommandBuffers(m_device->getLogicalDevice(), m_transientPool, 1, &handle);
+  vkFreeCommandBuffers(m_device.getLogicalDevice(), m_transientPool, 1, &handle);
 }
 
 } // namespace graphic_backend

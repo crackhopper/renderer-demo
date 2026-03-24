@@ -34,15 +34,15 @@ public:
   }
 
   void beginFrame(uint32_t currentFrameIndex);
-  VulkanCommandBuffer allocateBuffer(VkCommandBufferLevel level = VK_COMMAND_BUFFER_LEVEL_PRIMARY);
+  VulkanCommandBufferPtr allocateBuffer(VkCommandBufferLevel level = VK_COMMAND_BUFFER_LEVEL_PRIMARY);
 
-  VulkanCommandBuffer beginSingleTimeCommands();
-  void endSingleTimeCommands(VulkanCommandBuffer commandBuffer, VkQueue queue);
+  VulkanCommandBufferPtr beginSingleTimeCommands();
+  void endSingleTimeCommands(VulkanCommandBufferPtr commandBuffer, VkQueue queue);
 
 private:
   void createPool(VkCommandPool &pool, VkCommandPoolCreateFlags flags);
 
-  VulkanDevice *m_device = nullptr;
+  VulkanDevice &m_device;
   uint32_t m_currentFrameIndex = 0;
   uint32_t m_maxFramesInFlight = 0;
   uint32_t m_queueFamilyIndex = 0;

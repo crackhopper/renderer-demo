@@ -9,6 +9,52 @@ namespace LX_core {
 namespace graphic_backend {
 
 namespace {
+static VKAPI_ATTR VkBool32 VKAPI_CALL
+debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
+              VkDebugUtilsMessageTypeFlagsEXT messageType,
+              const VkDebugUtilsMessengerCallbackDataEXT *pCallbackData,
+              void *pUserData) {
+
+  std::cerr << "[Vulkan Validation Layer]: " << pCallbackData->pMessage
+            << std::endl;
+  return VK_FALSE;
+}
+
+VkResult CreateDebugUtilsMessengerEXT(
+    VkInstance instance, const VkDebugUtilsMessengerCreateInfoEXT *pCreateInfo,
+    const VkAllocationCallbacks *pAllocator,
+    VkDebugUtilsMessengerEXT *pDebugMessenger) {
+  auto func = (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(
+      instance, "vkCreateDebugUtilsMessengerEXT");
+  if (func != nullptr) {
+    return func(instance, pCreateInfo, pAllocator, pDebugMessenger);
+  } else {
+    return VK_ERROR_EXTENSION_NOT_PRESENT;
+  }
+}
+
+void DestroyDebugUtilsMessengerEXT(VkInstance instance,
+                                   VkDebugUtilsMessengerEXT debugMessenger,
+                                   const VkAllocationCallbacks *pAllocator) {
+  auto func = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(
+      instance, "vkDestroyDebugUtilsMessengerEXT");
+  if (func != nullptr) {
+    func(instance, debugMessenger, pAllocator);
+  }
+}
+
+void populateDebugMessengerCreateInfo(
+    VkDebugUtilsMessengerCreateInfoEXT &createInfo) {
+  createInfo = {};
+  createInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
+  createInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
+                               VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
+                               VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+  createInfo.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
+                           VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
+                           VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
+  createInfo.pfnUserCallback = debugCallback;
+}
 
 bool checkValidationLayerSupport(
     const std::vector<const char *> &validationLayers) {
@@ -95,11 +141,21 @@ VulkanDevice::findSupportedFormat(const std::vector<VkFormat> &candidates,
   throw std::runtime_error("failed to find supported format!");
 }
 
-VulkanDevice::VulkanDevice(Token) {
-  // Initialize descriptor manager
-  m_descriptorManager = std::make_unique<VulkanDescriptorManager>(
-      VulkanDescriptorManager::Token{});
+VkImageAspectFlags VulkanDevice::getDepthAspectMask() const {
+  switch (m_depthFormat) {
+  case VK_FORMAT_D32_SFLOAT:
+    return VK_IMAGE_ASPECT_DEPTH_BIT;
+
+  case VK_FORMAT_D32_SFLOAT_S8_UINT:
+  case VK_FORMAT_D24_UNORM_S8_UINT:
+    return VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+
+  default:
+    throw std::runtime_error("Unsupported depth format!");
+  }
 }
+
+VulkanDevice::VulkanDevice(Token) {}
 
 VulkanDevice::~VulkanDevice() {
   if (m_device != VK_NULL_HANDLE) {
@@ -108,16 +164,15 @@ VulkanDevice::~VulkanDevice() {
   shutdown();
 }
 
-VulkanDescriptorManager &VulkanDevice::getDescriptorManager() {
-  return *m_descriptorManager;
-}
-
 void VulkanDevice::createSurface() {
   m_surface = (VkSurfaceKHR)m_window->createGraphicsHandle(GraphicsAPI::Vulkan,
-                                                           &m_instance);
+                                                           m_instance);
   if (m_surface == VK_NULL_HANDLE) {
     throw std::runtime_error("Failed to create Vulkan surface handle");
   }
+}
+
+void VulkanDevice::findSurfaceDepthFormat() {
   m_surfaceFormat = findBestSurfaceFormat(m_physicalDevice, m_surface);
   m_depthFormat = findSupportedFormat(
       {VK_FORMAT_D32_SFLOAT, VK_FORMAT_D32_SFLOAT_S8_UINT,
@@ -141,13 +196,13 @@ void VulkanDevice::initialize(WindowPtr window, const char *appName,
 
   createInstance(appName, appVersion, engineName, engineVersion, apiVersion);
   createSurface();
-
   m_deviceExtensions = {
       VK_KHR_SWAPCHAIN_EXTENSION_NAME,
       // VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
       // VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
   };
   pickPhysicalDevice();
+  findSurfaceDepthFormat();
   createLogicalDevice();
 }
 
@@ -173,6 +228,11 @@ void VulkanDevice::shutdown() {
     m_depthFormat = VK_FORMAT_UNDEFINED;
   }
 
+  if (m_debugMessenger != VK_NULL_HANDLE) {
+    DestroyDebugUtilsMessengerEXT(m_instance, m_debugMessenger, nullptr);
+    m_debugMessenger = VK_NULL_HANDLE;
+  }
+
   if (m_instance != VK_NULL_HANDLE) {
     vkDestroyInstance(m_instance, nullptr);
     m_instance = VK_NULL_HANDLE;
@@ -196,12 +256,17 @@ void VulkanDevice::createInstance(const char *appName, uint32_t appVersion,
   createInfo.pApplicationInfo = &appInfo;
 
   // Check for validation layers (optional)
+  VkDebugUtilsMessengerCreateInfoEXT debugCreateInfo{};
   bool supported = checkValidationLayerSupport(m_validationLayers);
   if (supported) {
     m_instanceExtensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
     createInfo.ppEnabledLayerNames = m_validationLayers.data();
     createInfo.enabledLayerCount =
         static_cast<uint32_t>(m_validationLayers.size());
+
+    // 让 Instance 在创建和销毁时也能输出调试信息
+    populateDebugMessengerCreateInfo(debugCreateInfo);
+    createInfo.pNext = (VkDebugUtilsMessengerCreateInfoEXT *)&debugCreateInfo;
   } else {
     createInfo.enabledLayerCount = 0;
     createInfo.ppEnabledLayerNames = nullptr;
@@ -213,6 +278,13 @@ void VulkanDevice::createInstance(const char *appName, uint32_t appVersion,
 
   if (vkCreateInstance(&createInfo, nullptr, &m_instance) != VK_SUCCESS) {
     throw std::runtime_error("Failed to create Vulkan instance!");
+  }
+
+  if (supported) {
+    if (CreateDebugUtilsMessengerEXT(m_instance, &debugCreateInfo, nullptr,
+                                     &m_debugMessenger) != VK_SUCCESS) {
+      std::cerr << "Failed to set up debug messenger!" << std::endl;
+    }
   }
 }
 
@@ -403,8 +475,8 @@ void VulkanDevice::createLogicalDevice() {
                    &m_graphicsQueue);
   vkGetDeviceQueue(m_device, getPresentQueueFamilyIndex(), 0, &m_presentQueue);
 
-  // Initialize descriptor manager with device
-  m_descriptorManager->initialize(*this);
+  // Create descriptor manager with device reference
+  m_descriptorManager = VulkanDescriptorManager::create(*this);
 }
 
 uint32_t

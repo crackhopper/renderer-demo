@@ -12,7 +12,7 @@ VulkanSwapchain::VulkanSwapchain(Token, VulkanDevice &device,
                                  VkSurfaceKHR surface, VkExtent2D extent,
                                  uint32_t graphicsIdx, uint32_t presentIdx,
                                  uint32_t maxFramesInFlight)
-    : m_device(&device), m_surface(surface), m_extent(extent),
+    : m_device(device), m_surface(surface), m_extent(extent),
       m_maxFramesInFlight(maxFramesInFlight) {
 }
 
@@ -21,21 +21,18 @@ VulkanSwapchain::~VulkanSwapchain() { cleanup(); }
 void VulkanSwapchain::initialize(VulkanRenderPass &renderPass) {
   createInternal(m_extent);
   createImageViews();
-  m_depthFormat = renderPass.getDepthFormat();
+  m_depthFormat = m_device.getDepthFormat();
   createDepthResources();
   createSyncObjects();
   setupFramebuffers(renderPass);
 }
 
 void VulkanSwapchain::waitIdle() const {
-  if (m_device != nullptr) {
-    vkDeviceWaitIdle(m_device->getLogicalDevice());
-  }
+  vkDeviceWaitIdle(m_device.getLogicalDevice());
 }
 
 void VulkanSwapchain::cleanup() {
-  if (m_device == nullptr) return;
-  VkDevice logicalDevice = m_device->getLogicalDevice();
+  VkDevice logicalDevice = m_device.getLogicalDevice();
 
   m_framebuffers.clear();
 
@@ -76,7 +73,7 @@ void VulkanSwapchain::cleanup() {
 }
 
 void VulkanSwapchain::createInternal(VkExtent2D extent) {
-  VkPhysicalDevice physDevice = m_device->getPhysicalDevice();
+  VkPhysicalDevice physDevice = m_device.getPhysicalDevice();
 
   VkSurfaceCapabilitiesKHR capabilities;
   vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physDevice, m_surface, &capabilities);
@@ -90,14 +87,14 @@ void VulkanSwapchain::createInternal(VkExtent2D extent) {
   createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
   createInfo.surface = m_surface;
   createInfo.minImageCount = imageCount;
-  createInfo.imageFormat = VK_FORMAT_B8G8R8A8_SRGB;
-  createInfo.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+  createInfo.imageFormat = m_device.getSurfaceFormat().format;
+  createInfo.imageColorSpace = m_device.getSurfaceFormat().colorSpace;
   createInfo.imageExtent = extent;
   createInfo.imageArrayLayers = 1;
   createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 
-  uint32_t graphicsIdx = m_device->getGraphicsQueueFamilyIndex();
-  uint32_t presentIdx = m_device->getPresentQueueFamilyIndex();
+  uint32_t graphicsIdx = m_device.getGraphicsQueueFamilyIndex();
+  uint32_t presentIdx = m_device.getPresentQueueFamilyIndex();
   uint32_t queueFamilyIndices[] = {graphicsIdx, presentIdx};
 
   if (graphicsIdx != presentIdx) {
@@ -114,13 +111,13 @@ void VulkanSwapchain::createInternal(VkExtent2D extent) {
   createInfo.clipped = VK_TRUE;
   createInfo.oldSwapchain = VK_NULL_HANDLE;
 
-  if (vkCreateSwapchainKHR(m_device->getLogicalDevice(), &createInfo, nullptr, &m_handle) != VK_SUCCESS) {
+  if (vkCreateSwapchainKHR(m_device.getLogicalDevice(), &createInfo, nullptr, &m_handle) != VK_SUCCESS) {
     throw std::runtime_error("Failed to create swap chain!");
   }
 
-  vkGetSwapchainImagesKHR(m_device->getLogicalDevice(), m_handle, &imageCount, nullptr);
+  vkGetSwapchainImagesKHR(m_device.getLogicalDevice(), m_handle, &imageCount, nullptr);
   m_images.resize(imageCount);
-  vkGetSwapchainImagesKHR(m_device->getLogicalDevice(), m_handle, &imageCount, m_images.data());
+  vkGetSwapchainImagesKHR(m_device.getLogicalDevice(), m_handle, &imageCount, m_images.data());
 
   m_imageFormat = createInfo.imageFormat;
   m_extent = extent;
@@ -133,7 +130,7 @@ void VulkanSwapchain::createImageViews() {
     createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     createInfo.image = m_images[i];
     createInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    createInfo.format = m_imageFormat;
+    createInfo.format = m_device.getSurfaceFormat().format;
     createInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
     createInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
     createInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
@@ -144,7 +141,7 @@ void VulkanSwapchain::createImageViews() {
     createInfo.subresourceRange.baseArrayLayer = 0;
     createInfo.subresourceRange.layerCount = 1;
 
-    vkCreateImageView(m_device->getLogicalDevice(), &createInfo, nullptr, &m_imageViews[i]);
+    vkCreateImageView(m_device.getLogicalDevice(), &createInfo, nullptr, &m_imageViews[i]);
   }
 }
 
@@ -169,24 +166,24 @@ void VulkanSwapchain::createDepthResources() {
   imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
   imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-  if (vkCreateImage(m_device->getLogicalDevice(), &imageInfo, nullptr, &m_depthImage) != VK_SUCCESS) {
+  if (vkCreateImage(m_device.getLogicalDevice(), &imageInfo, nullptr, &m_depthImage) != VK_SUCCESS) {
     throw std::runtime_error("Failed to create depth image!");
   }
 
   VkMemoryRequirements memRequirements;
-  vkGetImageMemoryRequirements(m_device->getLogicalDevice(), m_depthImage, &memRequirements);
+  vkGetImageMemoryRequirements(m_device.getLogicalDevice(), m_depthImage, &memRequirements);
 
   VkMemoryAllocateInfo allocInfo{};
   allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
   allocInfo.allocationSize = memRequirements.size;
-  allocInfo.memoryTypeIndex = m_device->findMemoryTypeIndex(
+  allocInfo.memoryTypeIndex = m_device.findMemoryTypeIndex(
       memRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
-  if (vkAllocateMemory(m_device->getLogicalDevice(), &allocInfo, nullptr, &m_depthImageMemory) != VK_SUCCESS) {
+  if (vkAllocateMemory(m_device.getLogicalDevice(), &allocInfo, nullptr, &m_depthImageMemory) != VK_SUCCESS) {
     throw std::runtime_error("Failed to allocate depth image memory!");
   }
 
-  vkBindImageMemory(m_device->getLogicalDevice(), m_depthImage, m_depthImageMemory, 0);
+  vkBindImageMemory(m_device.getLogicalDevice(), m_depthImage, m_depthImageMemory, 0);
 
   VkImageViewCreateInfo viewInfo{};
   viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -205,7 +202,7 @@ void VulkanSwapchain::createDepthResources() {
   viewInfo.subresourceRange.baseArrayLayer = 0;
   viewInfo.subresourceRange.layerCount = 1;
 
-  if (vkCreateImageView(m_device->getLogicalDevice(), &viewInfo, nullptr, &m_depthImageView) != VK_SUCCESS) {
+  if (vkCreateImageView(m_device.getLogicalDevice(), &viewInfo, nullptr, &m_depthImageView) != VK_SUCCESS) {
     throw std::runtime_error("Failed to create depth image view!");
   }
 }
@@ -223,9 +220,9 @@ void VulkanSwapchain::createSyncObjects() {
   fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
   for (size_t i = 0; i < m_maxFramesInFlight; i++) {
-    vkCreateSemaphore(m_device->getLogicalDevice(), &semaphoreInfo, nullptr, &m_imageAvailableSemaphores[i]);
-    vkCreateSemaphore(m_device->getLogicalDevice(), &semaphoreInfo, nullptr, &m_renderFinishedSemaphores[i]);
-    vkCreateFence(m_device->getLogicalDevice(), &fenceInfo, nullptr, &m_inFlightFences[i]);
+    vkCreateSemaphore(m_device.getLogicalDevice(), &semaphoreInfo, nullptr, &m_imageAvailableSemaphores[i]);
+    vkCreateSemaphore(m_device.getLogicalDevice(), &semaphoreInfo, nullptr, &m_renderFinishedSemaphores[i]);
+    vkCreateFence(m_device.getLogicalDevice(), &fenceInfo, nullptr, &m_inFlightFences[i]);
   }
 }
 
@@ -236,7 +233,7 @@ void VulkanSwapchain::setupFramebuffers(VulkanRenderPass &renderPass) {
   for (auto imageView : m_imageViews) {
     attachments[0] = imageView;
     m_framebuffers.push_back(VulkanFrameBuffer::create(
-        *m_device, renderPass.getHandle(), attachments, m_extent));
+        m_device, renderPass.getHandle(), attachments, m_extent));
   }
 }
 
@@ -246,16 +243,16 @@ void VulkanSwapchain::rebuild(VkExtent2D newExtent, VulkanRenderPass &renderPass
 
   createInternal(newExtent);
   createImageViews();
-  m_depthFormat = renderPass.getDepthFormat();
+  m_depthFormat = m_device.getDepthFormat();
   createDepthResources();
   setupFramebuffers(renderPass);
 }
 
 VkResult VulkanSwapchain::acquireNextImage(uint32_t currentFrameIndex, uint32_t &imageIndex) {
-  vkWaitForFences(m_device->getLogicalDevice(), 1, &m_inFlightFences[currentFrameIndex], VK_TRUE, UINT64_MAX);
+  vkWaitForFences(m_device.getLogicalDevice(), 1, &m_inFlightFences[currentFrameIndex], VK_TRUE, UINT64_MAX);
 
   return vkAcquireNextImageKHR(
-      m_device->getLogicalDevice(), m_handle, UINT64_MAX,
+      m_device.getLogicalDevice(), m_handle, UINT64_MAX,
       m_imageAvailableSemaphores[currentFrameIndex],
       VK_NULL_HANDLE, &imageIndex);
 }
@@ -271,7 +268,7 @@ VkResult VulkanSwapchain::present(uint32_t currentFrameIndex, uint32_t imageInde
   presentInfo.pSwapchains = swapChains;
   presentInfo.pImageIndices = &imageIndex;
 
-  return vkQueuePresentKHR(m_device->getPresentQueue(), &presentInfo);
+  return vkQueuePresentKHR(m_device.getPresentQueue(), &presentInfo);
 }
 
 VkSemaphore VulkanSwapchain::getImageAvailableSemaphore(uint32_t i) const {
@@ -286,6 +283,10 @@ VkFence VulkanSwapchain::getInFlightFence(uint32_t i) const {
 
 VulkanFrameBuffer &VulkanSwapchain::getFramebuffer(uint32_t index) {
   return *m_framebuffers[index];
+}
+
+VkFormat VulkanSwapchain::getImageFormat() const {
+  return m_device.getSurfaceFormat().format;
 }
 
 } // namespace graphic_backend

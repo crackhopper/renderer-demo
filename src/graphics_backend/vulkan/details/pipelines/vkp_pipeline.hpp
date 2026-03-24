@@ -67,7 +67,7 @@ public:
   }
 
 protected:
-  VulkanDevice *m_device = nullptr;
+  VulkanDevice &m_device;
   VkDevice m_deviceHandle = VK_NULL_HANDLE;
   VkPipeline m_pipeline = VK_NULL_HANDLE;
   VkPipelineLayout m_layout = VK_NULL_HANDLE;

@@ -35,17 +35,17 @@ int main() {
     auto window = std::make_shared<LX_infra::Window>("Test Vulkan Depth", 64, 64);
 
     auto device = LX_core::graphic_backend::VulkanDevice::create();
-    device->initialize();
+    device->initialize(window, "TestVulkanDepth");
 
     VkInstance instance = device->getInstance();
-    void *surfaceHandlePtr =
-        window->createGraphicsHandle(GraphicsAPI::Vulkan, &instance);
-    if (!surfaceHandlePtr) {
+    LX_core::WindowGraphicsHandle surfaceHandle =
+        window->createGraphicsHandle(GraphicsAPI::Vulkan, instance);
+    if (!surfaceHandle) {
       std::cerr << "Failed to create Vulkan surface handle\n";
       return 1;
     }
 
-    VkSurfaceKHR surface = *static_cast<VkSurfaceKHR *>(surfaceHandlePtr);
+    VkSurfaceKHR surface = static_cast<VkSurfaceKHR>(surfaceHandle);
 
     // Keep depth format aligned with VulkanSwapchain::createDepthResources().
     const VkFormat depthFormat = VK_FORMAT_D24_UNORM_S8_UINT;
@@ -75,7 +75,6 @@ int main() {
 
     // Cleanup surface (window impl doesn't destroy it explicitly).
     vkDestroySurfaceKHR(instance, surface, nullptr);
-    delete static_cast<VkSurfaceKHR *>(surfaceHandlePtr);
 
     return 0;
   } catch (const std::exception &e) {

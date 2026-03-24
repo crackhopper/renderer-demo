@@ -45,7 +45,7 @@ public:
   VkExtent2D getExtent() const { return m_extent; }
   VulkanFrameBuffer &getFramebuffer(uint32_t index);
   uint32_t getImageCount() const { return static_cast<uint32_t>(m_images.size()); }
-  VkFormat getImageFormat() const { return m_imageFormat; }
+  VkFormat getImageFormat() const;
   VkImageView getDepthImageView() const { return m_depthImageView; }
 
   // --- 辅助函数 ---
@@ -59,7 +59,7 @@ private:
   void createSyncObjects();
   void setupFramebuffers(VulkanRenderPass &renderPass);
 
-  VulkanDevice *m_device = nullptr;
+  VulkanDevice &m_device;
   uint32_t m_maxFramesInFlight = 3;
   VkSurfaceKHR m_surface = VK_NULL_HANDLE;
 

@@ -1,6 +1,7 @@
 #include "graphics_backend/vulkan/details/pipelines/vkp_blinnphong.hpp"
 #include "graphics_backend/vulkan/details/render_objects/vkr_renderpass.hpp"
 #include "graphics_backend/vulkan/details/vk_device.hpp"
+#include "infra/window/window.hpp"
 
 #include <filesystem>
 #include <iostream>
@@ -37,8 +38,11 @@ int main() {
       return 1;
     }
 
+    LX_infra::Window::Initialize();
+    auto window = std::make_shared<LX_infra::Window>("Test Vulkan Pipeline", 64, 64);
+
     auto device = LX_core::graphic_backend::VulkanDevice::create();
-    device->initialize();
+    device->initialize(window, "TestVulkanPipeline");
 
     const VkFormat colorFormat = VK_FORMAT_B8G8R8A8_UNORM;
     const VkFormat depthFormat = VK_FORMAT_D32_SFLOAT_S8_UINT;

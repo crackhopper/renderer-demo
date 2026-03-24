@@ -36,7 +36,7 @@ public:
   VkFormat getDepthFormat() const { return m_depthFormat; }
 
 private:
-  VulkanDevice *m_device = nullptr;
+  VulkanDevice &m_device;
   VkRenderPass m_renderPass = VK_NULL_HANDLE;
   VkFormat m_depthFormat = VK_FORMAT_UNDEFINED;
   std::vector<VkClearValue> m_clearValues{2}; // 0: Color, 1: Depth

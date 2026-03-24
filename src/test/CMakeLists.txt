@@ -33,7 +33,6 @@ foreach(TEST_EXE ${TEST_EXE_LIST})
   # )  
 endforeach()
 
-
 # Ensure shader SPIR-V is built before any shader-dependent tests run.
 add_dependencies(BuildTest CompileShaders)
 

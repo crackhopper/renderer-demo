@@ -20,6 +20,9 @@ public:
   VulkanTexture(Token, VulkanDevice &device, uint32_t width,
                 uint32_t height, VkFormat format, VkImageUsageFlags usage,
                 VkFilter filter);
+  VulkanTexture(Token, VulkanDevice &device, uint32_t width,
+                uint32_t height, VkFormat format, VkImageUsageFlags usage,
+                VkImageAspectFlags aspectMask);
   ~VulkanTexture();
 
   static VulkanTexturePtr create(VulkanDevice &device, uint32_t width,
@@ -29,6 +32,11 @@ public:
     return std::make_unique<VulkanTexture>(Token{}, device, width, height,
                                            format, usage, filter);
   }
+
+  static VulkanTexturePtr createForAttachment(
+      VulkanDevice &device, uint32_t width, uint32_t height,
+      VkFormat format, VkImageUsageFlags usage,
+      VkImageAspectFlags aspectMask);
 
   // 用于 Descriptor Set 绑定的信息
   VkDescriptorImageInfo getDescriptorInfo() const {
@@ -40,15 +48,17 @@ public:
   VkImageLayout getCurrentLayout() const { return m_currentLayout; }
 
   void transitionLayout(VulkanCommandBuffer &cmd, VkImageLayout oldLayout,
-                        VkImageLayout newLayout);
+                        VkImageLayout newLayout, VkPipelineStageFlags pipelineStage,
+                        VkImageAspectFlags aspectMask = VK_IMAGE_ASPECT_COLOR_BIT);
   void copyFromBuffer(VulkanCommandBuffer &cmd, class VulkanBuffer &buffer);
 
   VkFormat getFormat() const { return m_format; }
   uint32_t getWidth() const { return m_width; }
   uint32_t getHeight() const { return m_height; }
+  VkDeviceMemory getMemory() const { return m_memory; }
 
 private:
-  void createImageView();
+  void createImageView(VkImageAspectFlags aspectMask);
   void createSampler(VkFilter filter);
 
   VkDevice m_device = VK_NULL_HANDLE;

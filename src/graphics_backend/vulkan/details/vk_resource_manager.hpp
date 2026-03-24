@@ -1,11 +1,12 @@
 #pragma once
 
+#include "core/gpu/render_resource.hpp"
+#include "pipelines/vkp_pipeline.hpp"
 #include <memory>
+#include <optional>
 #include <unordered_map>
 #include <unordered_set>
 #include <variant>
-#include "core/gpu/render_resource.hpp"
-#include "pipelines/vkp_pipeline.hpp"
 
 #include <vulkan/vulkan.h>
 
@@ -25,7 +26,6 @@ using VulkanShaderPtr = std::unique_ptr<VulkanShader>;
 using VulkanAnyResource =
     std::variant<VulkanBufferPtr, VulkanTexturePtr, VulkanShaderPtr>;
 
-
 class VulkanResourceManager;
 using VulkanResourceManagerPtr = std::unique_ptr<VulkanResourceManager>;
 class VulkanResourceManager {
@@ -35,7 +35,7 @@ public:
   explicit VulkanResourceManager(Token token, VulkanDevice &device);
   ~VulkanResourceManager();
 
-  static VulkanResourceManagerPtr create(VulkanDevice &device){
+  static VulkanResourceManagerPtr create(VulkanDevice &device) {
     auto p = std::make_unique<VulkanResourceManager>(Token{}, device);
     return p;
   }
@@ -44,29 +44,28 @@ public:
   VulkanResourceManager(const VulkanResourceManager &) = delete;
   VulkanResourceManager &operator=(const VulkanResourceManager &) = delete;
 
-  void syncResource(const IRenderResourcePtr &cpuRes);
+  void syncResource(VulkanCommandBufferManager &cmdBufferManager,
+                    const IRenderResourcePtr &cpuRes);
   void collectGarbage();
 
-  void initializeRenderPassAndPipeline(VkSurfaceFormatKHR surfaceFormat, VkFormat depthFormat);
+  void initializeRenderPassAndPipeline(VkSurfaceFormatKHR surfaceFormat,
+                                       VkFormat depthFormat);
 
-  // 快捷访问接口
-  VulkanBuffer* getBuffer(void *handle);
-  VulkanTexture* getTexture(void *handle);
-  VulkanShader* getShader(void *handle);
-  VulkanRenderPass* getRenderPass();
-  VulkanPipelineBase* getRenderPipeline();
-
-  // Needed for GPU-side uploads that require transient command buffers (e.g. textures).
-  void setCommandBufferManager(VulkanCommandBufferManager &mgr) {
-    m_cmdBufferMgr = &mgr;
-  }
+  // 快捷访问接口 - lookup functions return optional references since resource
+  // may not exist
+  std::optional<std::reference_wrapper<VulkanBuffer>> getBuffer(void *handle);
+  std::optional<std::reference_wrapper<VulkanTexture>> getTexture(void *handle);
+  std::optional<std::reference_wrapper<VulkanShader>> getShader(void *handle);
+  VulkanRenderPass &getRenderPass();
+  VulkanPipelineBase &getRenderPipeline();
 
 private:
   // 内部创建与更新逻辑
   std::shared_ptr<VulkanAnyResource>
   createGpuResource(const IRenderResourcePtr &cpuRes);
   void updateGpuResource(std::shared_ptr<VulkanAnyResource> &gpuRes,
-                         const IRenderResourcePtr &cpuRes);
+                         const IRenderResourcePtr &cpuRes,
+                         VulkanCommandBufferManager &cmdBufferManager);
 
   VulkanDevice &m_device;
   std::unordered_map<void *, std::shared_ptr<VulkanAnyResource>> m_gpuResources;
@@ -74,10 +73,8 @@ private:
 
   // 管理若干个render pass和pipeline
   // TODO: 暂时仅支持了1个
-  VulkanRenderPass *m_renderPass = nullptr;
-  VulkanPipelineBase *m_pipeline = nullptr;
-
-  VulkanCommandBufferManager *m_cmdBufferMgr = nullptr;
+  std::unique_ptr<VulkanRenderPass> m_renderPass;
+  std::unique_ptr<VulkanPipelineBase> m_pipeline;
 };
 
 } // namespace LX_core::graphic_backend

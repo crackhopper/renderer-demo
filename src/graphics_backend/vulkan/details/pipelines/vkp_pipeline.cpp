@@ -22,7 +22,7 @@ VulkanPipelineBase::VulkanPipelineBase(
     Token, VulkanDevice &device, VkExtent2D extent,
     const std::string &shaderName, PipelineSlotDetails *slots,
     uint32_t slotCount, const PushConstantDetails &pushConstants)
-    : m_device(&device), m_deviceHandle(device.getLogicalDevice()), m_extent(extent),
+    : m_device(device), m_deviceHandle(device.getLogicalDevice()), m_extent(extent),
       m_shaderName(shaderName), m_slots(slots, slots + slotCount),
       m_pushConstants(pushConstants) {}
 
@@ -280,7 +280,7 @@ void VulkanPipelineBase::loadShaders() {
 }
 
 void VulkanPipelineBase::createLayout() {
-  auto &descriptorMgr = m_device->getDescriptorManager();
+  auto &descriptorMgr = m_device.getDescriptorManager();
 
   std::unordered_map<uint32_t, std::vector<PipelineSlotDetails>> setGroups;
   for (const auto &slot : m_slots) {

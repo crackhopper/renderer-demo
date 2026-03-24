@@ -1,12 +1,16 @@
 #include "graphics_backend/vulkan/details/vk_device.hpp"
+#include "infra/window/window.hpp"
 
 #include <vulkan/vulkan.h>
 #include <iostream>
 
 int main() {
   try {
+    LX_infra::Window::Initialize();
+    auto window = std::make_shared<LX_infra::Window>("Test Vulkan Device", 64, 64);
+
     auto device = LX_core::graphic_backend::VulkanDevice::create();
-    device->initialize();
+    device->initialize(window, "TestVulkanDevice");
 
     if (device->getInstance() == VK_NULL_HANDLE) {
       std::cerr << "VK_NULL_HANDLE instance\n";

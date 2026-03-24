@@ -7,7 +7,7 @@ namespace LX_core {
 namespace graphic_backend {
 
 VulkanRenderPass::VulkanRenderPass(Token, VulkanDevice &device, VkFormat colorFormat, VkFormat depthFormat)
-    : m_device(&device), m_depthFormat(depthFormat) {
+    : m_device(device), m_depthFormat(depthFormat) {
   // Color attachment
   VkAttachmentDescription colorAttachment{};
   colorAttachment.format = colorFormat;
@@ -67,7 +67,7 @@ VulkanRenderPass::VulkanRenderPass(Token, VulkanDevice &device, VkFormat colorFo
   renderPassInfo.dependencyCount = 1;
   renderPassInfo.pDependencies = &dependency;
 
-  if (vkCreateRenderPass(device.getLogicalDevice(), &renderPassInfo, nullptr, &m_renderPass) != VK_SUCCESS) {
+  if (vkCreateRenderPass(m_device.getLogicalDevice(), &renderPassInfo, nullptr, &m_renderPass) != VK_SUCCESS) {
     throw std::runtime_error("Failed to create render pass!");
   }
 
@@ -77,8 +77,8 @@ VulkanRenderPass::VulkanRenderPass(Token, VulkanDevice &device, VkFormat colorFo
 }
 
 VulkanRenderPass::~VulkanRenderPass() {
-  if (m_device != nullptr && m_renderPass != VK_NULL_HANDLE) {
-    vkDestroyRenderPass(m_device->getLogicalDevice(), m_renderPass, nullptr);
+  if (m_renderPass != VK_NULL_HANDLE) {
+    vkDestroyRenderPass(m_device.getLogicalDevice(), m_renderPass, nullptr);
     m_renderPass = VK_NULL_HANDLE;
   }
 }

@@ -1,13 +1,13 @@
 #include "vk_resource_manager.hpp"
-#include "vk_device.hpp"
 #include "commands/vkc_cmdbuffer_manager.hpp"
-#include "pipelines/vkp_blinnphong.hpp"
-#include "resources/vkr_buffer.hpp"
-#include "resources/vkr_texture.hpp"
-#include "resources/vkr_shader.hpp"
-#include "render_objects/vkr_renderpass.hpp"
 #include "core/resources/shader.hpp"
 #include "core/resources/texture.hpp"
+#include "pipelines/vkp_blinnphong.hpp"
+#include "render_objects/vkr_renderpass.hpp"
+#include "resources/vkr_buffer.hpp"
+#include "resources/vkr_shader.hpp"
+#include "resources/vkr_texture.hpp"
+#include "vk_device.hpp"
 #include <stdexcept>
 
 namespace LX_core::graphic_backend {
@@ -34,20 +34,16 @@ VulkanResourceManager::~VulkanResourceManager() {
   if (m_device.getLogicalDevice() != VK_NULL_HANDLE) {
     vkDeviceWaitIdle(m_device.getLogicalDevice());
   }
-
-  // RenderPass/Pipeline are stored as raw pointers in this manager.
-  delete m_pipeline;
-  m_pipeline = nullptr;
-
-  delete m_renderPass;
-  m_renderPass = nullptr;
 }
 
-void VulkanResourceManager::syncResource(const IRenderResourcePtr &cpuRes) {
+void VulkanResourceManager::syncResource(
+    VulkanCommandBufferManager &cmdBufferManager,
+    const IRenderResourcePtr &cpuRes) {
   if (!cpuRes)
     return;
 
-  // Push constants are written directly into command buffers; no Vulkan object needed.
+  // Push constants are written directly into command buffers; no Vulkan object
+  // needed.
   if (cpuRes->getType() == ResourceType::PushConstant) {
     return;
   }
@@ -59,10 +55,10 @@ void VulkanResourceManager::syncResource(const IRenderResourcePtr &cpuRes) {
   if (it == m_gpuResources.end()) {
     m_gpuResources[handle] = createGpuResource(cpuRes);
     // 新创建的资源强制更新一次数据
-    updateGpuResource(m_gpuResources[handle], cpuRes);
+    updateGpuResource(m_gpuResources[handle], cpuRes, cmdBufferManager);
     cpuRes->clearDirty();
   } else if (cpuRes->isDirty()) {
-    updateGpuResource(it->second, cpuRes);
+    updateGpuResource(it->second, cpuRes, cmdBufferManager);
     cpuRes->clearDirty();
   }
 }
@@ -107,14 +103,15 @@ VulkanResourceManager::createGpuResource(const IRenderResourcePtr &cpuRes) {
   case ResourceType::CombinedImageSampler: {
     auto texCpu = std::dynamic_pointer_cast<CombinedTextureSampler>(cpuRes);
     if (!texCpu || !texCpu->texture()) {
-      throw std::runtime_error("CombinedImageSampler resource missing texture data");
+      throw std::runtime_error(
+          "CombinedImageSampler resource missing texture data");
     }
     const auto &desc = texCpu->texture()->desc();
     const VkFormat vkFormat = toVkFormat(desc.format);
-    VkImageUsageFlags usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-    return std::make_shared<VulkanAnyResource>(
-        VulkanTexture::create(m_device, desc.width, desc.height, vkFormat,
-                               usage, VK_FILTER_LINEAR));
+    VkImageUsageFlags usage =
+        VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    return std::make_shared<VulkanAnyResource>(VulkanTexture::create(
+        m_device, desc.width, desc.height, vkFormat, usage, VK_FILTER_LINEAR));
   }
 
   default:
@@ -124,7 +121,8 @@ VulkanResourceManager::createGpuResource(const IRenderResourcePtr &cpuRes) {
 
 void VulkanResourceManager::updateGpuResource(
     std::shared_ptr<VulkanAnyResource> &gpuRes,
-    const IRenderResourcePtr &cpuRes) {
+    const IRenderResourcePtr &cpuRes,
+    VulkanCommandBufferManager &cmdBufferManager) {
   std::visit(
       [&](auto &&res) {
         using T = std::decay_t<decltype(res)>;
@@ -134,11 +132,6 @@ void VulkanResourceManager::updateGpuResource(
           // uploadData（内部处理 staging）
           res->uploadData(cpuRes->getRawData(), cpuRes->getByteSize());
         } else if constexpr (std::is_same_v<T, VulkanTexturePtr>) {
-          if (!m_cmdBufferMgr) {
-            // Without a command-buffer manager we can't transition/upload.
-            return;
-          }
-
           const VkDeviceSize imageSize =
               static_cast<VkDeviceSize>(cpuRes->getByteSize());
 
@@ -149,16 +142,19 @@ void VulkanResourceManager::updateGpuResource(
                   VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
           staging->uploadData(cpuRes->getRawData(), imageSize);
 
-          auto cmd = m_cmdBufferMgr->beginSingleTimeCommands();
+          auto cmd = cmdBufferManager.beginSingleTimeCommands();
 
           // Upload the texture contents.
-          res->transitionLayout(cmd, res->getCurrentLayout(),
-                                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-          res->copyFromBuffer(cmd, *staging);
-          res->transitionLayout(cmd, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+          res->transitionLayout(*cmd, res->getCurrentLayout(),
+                                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT);
+          res->copyFromBuffer(*cmd, *staging);
+          res->transitionLayout(*cmd, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
 
-          m_cmdBufferMgr->endSingleTimeCommands(cmd, m_device.getGraphicsQueue());
+          cmdBufferManager.endSingleTimeCommands(std::move(cmd),
+                                                   m_device.getGraphicsQueue());
         }
         // Shaders are immutable for this initial framework; no updates needed.
       },
@@ -183,12 +179,13 @@ void VulkanResourceManager::initializeRenderPassAndPipeline(
   }
 
   // Render pass depends on the swapchain image format.
-  m_renderPass = VulkanRenderPass::create(m_device, surfaceFormat.format, depthFormat).release();
+  m_renderPass =
+      VulkanRenderPass::create(m_device, surfaceFormat.format, depthFormat);
 
   // Pipeline viewport/scissor values are overwritten dynamically each frame,
   // so we can use a small dummy extent here.
   VkExtent2D dummyExtent{1, 1};
-  m_pipeline = VkPipelineBlinnPhong::create(m_device, dummyExtent).release();
+  m_pipeline = VkPipelineBlinnPhong::create(m_device, dummyExtent);
 
   // Build the actual VkPipeline object (layout/shaders are created above).
   // This is required before vkCmdBindPipeline can use a valid handle.
@@ -200,29 +197,32 @@ void VulkanResourceManager::initializeRenderPassAndPipeline(
   auto it = m_gpuResources.find(handle);                                       \
   if (it != m_gpuResources.end()) {                                            \
     if (auto resPtr = std::get_if<VariantType>(&(*(it->second)))) {            \
-      return resPtr->get();                                                    \
+      return std::ref(*(resPtr->get()));                                       \
     }                                                                          \
   }                                                                            \
-  return nullptr;
+  return std::nullopt;
 
-VulkanBuffer *VulkanResourceManager::getBuffer(void *handle) {
-  GET_RESOURCE_IMPL(VulkanBuffer *, VulkanBufferPtr);
+std::optional<std::reference_wrapper<VulkanBuffer>>
+VulkanResourceManager::getBuffer(void *handle) {
+  GET_RESOURCE_IMPL(VulkanBuffer, VulkanBufferPtr);
 }
 
-VulkanTexture *VulkanResourceManager::getTexture(void *handle) {
-  GET_RESOURCE_IMPL(VulkanTexture *, VulkanTexturePtr);
+std::optional<std::reference_wrapper<VulkanTexture>>
+VulkanResourceManager::getTexture(void *handle) {
+  GET_RESOURCE_IMPL(VulkanTexture, VulkanTexturePtr);
 }
 
-VulkanShader *VulkanResourceManager::getShader(void *handle) {
-  GET_RESOURCE_IMPL(VulkanShader *, VulkanShaderPtr);
+std::optional<std::reference_wrapper<VulkanShader>>
+VulkanResourceManager::getShader(void *handle) {
+  GET_RESOURCE_IMPL(VulkanShader, VulkanShaderPtr);
 }
 
-VulkanRenderPass *VulkanResourceManager::getRenderPass() {
-  return m_renderPass;
+VulkanRenderPass &VulkanResourceManager::getRenderPass() {
+  return *m_renderPass;
 }
 
-VulkanPipelineBase *VulkanResourceManager::getRenderPipeline() {
-  return m_pipeline;
+VulkanPipelineBase &VulkanResourceManager::getRenderPipeline() {
+  return *m_pipeline;
 }
 
 } // namespace LX_core::graphic_backend

@@ -2,6 +2,7 @@
 #include "graphics_backend/vulkan/details/resources/vkr_buffer.hpp"
 #include "graphics_backend/vulkan/details/resources/vkr_texture.hpp"
 #include "graphics_backend/vulkan/details/vk_device.hpp"
+#include "infra/window/window.hpp"
 
 #include <cstdint>
 #include <iostream>
@@ -9,8 +10,11 @@
 
 int main() {
   try {
+    LX_infra::Window::Initialize();
+    auto window = std::make_shared<LX_infra::Window>("Test Vulkan Texture", 64, 64);
+
     auto device = LX_core::graphic_backend::VulkanDevice::create();
-    device->initialize();
+    device->initialize(window, "TestVulkanTexture");
 
     auto cmdMgr = LX_core::graphic_backend::VulkanCommandBufferManager::create(
         *device, /*maxFramesInFlight=*/1,
@@ -47,13 +51,15 @@ int main() {
     auto cmd = cmdMgr->beginSingleTimeCommands();
 
     // Transition -> copy -> transition back.
-    texture->transitionLayout(cmd, VK_IMAGE_LAYOUT_UNDEFINED,
-                               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-    texture->copyFromBuffer(cmd, *staging);
-    texture->transitionLayout(cmd, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    texture->transitionLayout(*cmd, VK_IMAGE_LAYOUT_UNDEFINED,
+                               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                               VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT);
+    texture->copyFromBuffer(*cmd, *staging);
+    texture->transitionLayout(*cmd, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                               VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
 
-    cmdMgr->endSingleTimeCommands(cmd, device->getGraphicsQueue());
+    cmdMgr->endSingleTimeCommands(std::move(cmd), device->getGraphicsQueue());
 
     if (texture->getCurrentLayout() !=
         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {

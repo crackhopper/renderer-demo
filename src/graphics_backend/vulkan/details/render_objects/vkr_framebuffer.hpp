@@ -30,7 +30,7 @@ public:
   VkExtent2D getExtent() const { return m_extent; }
 
 private:
-  VulkanDevice *m_device = nullptr;
+  VulkanDevice &m_device;
   VkFramebuffer m_framebuffer = VK_NULL_HANDLE;
   VkExtent2D m_extent{};
 };

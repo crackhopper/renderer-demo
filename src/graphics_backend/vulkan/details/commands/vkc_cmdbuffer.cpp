@@ -50,12 +50,8 @@ void VulkanCommandBuffer::bindPipeline(VulkanPipelineBase &pipeline) {
   m_pushConstantsDetails = pipeline.getPushConstantDetails();
 }
 
-void VulkanCommandBuffer::bindResources(VulkanPipelineBase &pipeline, const RenderItem &item) {
-  if (!m_resourceManager) {
-    throw std::runtime_error("VulkanCommandBuffer::bindResources missing VulkanResourceManager");
-  }
-
-  auto &descriptorMgr = m_device->getDescriptorManager();
+void VulkanCommandBuffer::bindResources(VulkanResourceManager &resourceManager, VulkanPipelineBase &pipeline, const RenderItem &item) {
+  auto &descriptorMgr = m_device.getDescriptorManager();
 
   auto findBySlotId = [&](PipelineSlotId slotId) -> IRenderResourcePtr {
     for (const auto &cpuRes : item.descriptorResources) {
@@ -89,24 +85,26 @@ void VulkanCommandBuffer::bindResources(VulkanPipelineBase &pipeline, const Rend
       }
 
       if (slot.type == ResourceType::UniformBuffer) {
-        auto *buffer = m_resourceManager->getBuffer(cpuRes->getResourceHandle());
-        if (!buffer) {
+        auto bufferOpt = resourceManager.getBuffer(cpuRes->getResourceHandle());
+        if (!bufferOpt) {
           continue;
         }
+        auto &buffer = bufferOpt->get();
 
         VkDescriptorBufferInfo bufferInfo{};
-        bufferInfo.buffer = buffer->getHandle();
+        bufferInfo.buffer = buffer.getHandle();
         bufferInfo.offset = 0;
-        bufferInfo.range = buffer->getSize();
+        bufferInfo.range = buffer.getSize();
 
         setPtr->updateBuffer(slot.binding, bufferInfo, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
       } else if (slot.type == ResourceType::CombinedImageSampler) {
-        auto *texture = m_resourceManager->getTexture(cpuRes->getResourceHandle());
-        if (!texture) {
+        auto textureOpt = resourceManager.getTexture(cpuRes->getResourceHandle());
+        if (!textureOpt) {
           continue;
         }
+        auto &texture = textureOpt->get();
 
-        VkDescriptorImageInfo imageInfo = texture->getDescriptorInfo();
+        VkDescriptorImageInfo imageInfo = texture.getDescriptorInfo();
         setPtr->updateImage(slot.binding, imageInfo,
                             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
       }
@@ -118,39 +116,38 @@ void VulkanCommandBuffer::bindResources(VulkanPipelineBase &pipeline, const Rend
                             0, nullptr);
     allocatedSets.push_back(std::move(setPtr));
   }
+
+  // Bind vertex buffer.
+  if (item.vertexBuffer) {
+    auto vbOpt = resourceManager.getBuffer(item.vertexBuffer->getResourceHandle());
+    if (vbOpt) {
+      VkBuffer vbHandle = vbOpt->get().getHandle();
+      VkDeviceSize offsets[] = {0};
+      vkCmdBindVertexBuffers(m_handle, 0, 1, &vbHandle, offsets);
+    }
+  }
+
+  // Bind index buffer.
+  if (item.indexBuffer) {
+    auto ibOpt = resourceManager.getBuffer(item.indexBuffer->getResourceHandle());
+    if (ibOpt) {
+      vkCmdBindIndexBuffer(m_handle, ibOpt->get().getHandle(), 0, VK_INDEX_TYPE_UINT32);
+    }
+  }
+
+  // Push constants (object-level data: model matrix, etc.).
+  if (item.objectInfo && m_pushConstantsDetails.size > 0) {
+    vkCmdPushConstants(m_handle, m_pipelineLayout,
+                       m_pushConstantsDetails.stageFlags,
+                       m_pushConstantsDetails.offset,
+                       m_pushConstantsDetails.size,
+                       item.objectInfo->getRawData());
+  }
 }
 
 void VulkanCommandBuffer::drawItem(const RenderItem &item) {
-  if (!m_resourceManager) {
-    throw std::runtime_error("VulkanCommandBuffer::drawItem missing VulkanResourceManager");
-  }
-
   if (!item.vertexBuffer || !item.indexBuffer) {
     return;
-  }
-
-  auto *vertexBuffer = m_resourceManager->getBuffer(item.vertexBuffer->getResourceHandle());
-  auto *indexBuffer = m_resourceManager->getBuffer(item.indexBuffer->getResourceHandle());
-  if (!vertexBuffer || !indexBuffer) {
-    return;
-  }
-
-  // Binding vertex buffer (binding = 0 is hardcoded by pipeline vertex input layout).
-  VkBuffer vb = vertexBuffer->getHandle();
-  VkDeviceSize offsets[] = {0};
-  vkCmdBindVertexBuffers(m_handle, 0, 1, &vb, offsets);
-
-  // Binding index buffer.
-  vkCmdBindIndexBuffer(m_handle, indexBuffer->getHandle(), 0,
-                        VK_INDEX_TYPE_UINT32);
-
-  // Push constants (optional).
-  if (item.objectInfo) {
-    if (m_pipelineLayout != VK_NULL_HANDLE && m_pushConstantsDetails.size > 0) {
-      vkCmdPushConstants(m_handle, m_pipelineLayout, m_pushConstantsDetails.stageFlags,
-                         m_pushConstantsDetails.offset, m_pushConstantsDetails.size,
-                         item.objectInfo->getRawData());
-    }
   }
 
   // Indexed draw.

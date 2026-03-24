@@ -140,12 +140,8 @@ void DescriptorSet::updateBatch(
                          nullptr);
 }
 
-VulkanDescriptorManager::VulkanDescriptorManager(Token)
-    : m_currentFrameIndex(0) {
-}
-
-void VulkanDescriptorManager::initialize(VulkanDevice &device) {
-  m_device = &device;
+VulkanDescriptorManager::VulkanDescriptorManager(Token, VulkanDevice &device)
+    : m_device(device), m_currentFrameIndex(0) {
   m_frameContexts.resize(m_maxFramesInFlight);
 
   // 为每一帧创建一个独立的描述符池
@@ -173,7 +169,7 @@ void VulkanDescriptorManager::initialize(VulkanDevice &device) {
     poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
     poolInfo.pPoolSizes = poolSizes.data();
 
-    if (vkCreateDescriptorPool(device.getLogicalDevice(), &poolInfo, nullptr,
+    if (vkCreateDescriptorPool(m_device.getLogicalDevice(), &poolInfo, nullptr,
                                &m_frameContexts[i].pool) != VK_SUCCESS) {
       throw std::runtime_error("failed to create descriptor pool for frame " +
                                std::to_string(i));
@@ -181,17 +177,19 @@ void VulkanDescriptorManager::initialize(VulkanDevice &device) {
   }
 }
 
-VulkanDescriptorManager::~VulkanDescriptorManager() {
-  if (!m_device) return;
+VulkanDescriptorManagerPtr VulkanDescriptorManager::create(VulkanDevice &device) {
+  return std::make_unique<VulkanDescriptorManager>(Token{}, device);
+}
 
+VulkanDescriptorManager::~VulkanDescriptorManager() {
   // 1. 等待 GPU 空闲，确保没有任何 DescriptorSet 正在被读取
-  vkDeviceWaitIdle(m_device->getLogicalDevice());
+  vkDeviceWaitIdle(m_device.getLogicalDevice());
 
   // 2. 销毁全局缓存的 Layouts
   // Layout 是跨帧共享的，只需销毁一次
   for (auto &pair : m_layoutCache) {
     if (pair.second != VK_NULL_HANDLE) {
-      vkDestroyDescriptorSetLayout(m_device->getLogicalDevice(), pair.second, nullptr);
+      vkDestroyDescriptorSetLayout(m_device.getLogicalDevice(), pair.second, nullptr);
     }
   }
   m_layoutCache.clear();
@@ -200,7 +198,7 @@ VulkanDescriptorManager::~VulkanDescriptorManager() {
   for (uint32_t i = 0; i < m_maxFramesInFlight; ++i) {
     if (m_frameContexts[i].pool != VK_NULL_HANDLE) {
       // 销毁池会自动释放所有关联的 VkDescriptorSet 句柄
-      vkDestroyDescriptorPool(m_device->getLogicalDevice(), m_frameContexts[i].pool,
+      vkDestroyDescriptorPool(m_device.getLogicalDevice(), m_frameContexts[i].pool,
                               nullptr);
     }
 
@@ -211,7 +209,7 @@ VulkanDescriptorManager::~VulkanDescriptorManager() {
 }
 
 VkDevice VulkanDescriptorManager::getDeviceHandle() const {
-  return m_device ? m_device->getLogicalDevice() : VK_NULL_HANDLE;
+  return m_device.getLogicalDevice();
 }
 
 VkDescriptorSetLayout VulkanDescriptorManager::getOrCreateLayout(
@@ -246,7 +244,7 @@ VkDescriptorSetLayout VulkanDescriptorManager::getOrCreateLayout(
   layoutInfo.pBindings = bindings.data();
 
   VkDescriptorSetLayout layout;
-  if (vkCreateDescriptorSetLayout(m_device->getLogicalDevice(), &layoutInfo, nullptr,
+  if (vkCreateDescriptorSetLayout(m_device.getLogicalDevice(), &layoutInfo, nullptr,
                                   &layout) != VK_SUCCESS) {
     throw std::runtime_error("Vulkan: Failed to create descriptor set layout!");
   }
@@ -280,7 +278,7 @@ DescriptorSetPtr VulkanDescriptorManager::allocateSet(
     allocInfo.pSetLayouts = &layout;
 
     VkResult result =
-        vkAllocateDescriptorSets(m_device->getLogicalDevice(), &allocInfo, &setHandle);
+        vkAllocateDescriptorSets(m_device.getLogicalDevice(), &allocInfo, &setHandle);
 
     if (result != VK_SUCCESS) {
       // 这里可以扩展：如果池满了，动态创建新池
@@ -326,17 +324,15 @@ void VulkanDescriptorManager::returnSet(VkDescriptorSet set,
 }
 
 void VulkanDescriptorManager::reset() {
-  if (!m_device) return;
-
   // 必须确保 GPU 已经停下，否则重置池会导致正在执行的命令崩溃
-  vkDeviceWaitIdle(m_device->getLogicalDevice());
+  vkDeviceWaitIdle(m_device.getLogicalDevice());
 
   for (uint32_t i = 0; i < m_maxFramesInFlight; ++i) {
     auto &context = m_frameContexts[i];
 
     // 1. 重置物理描述符池 (这会使该池分配的所有 VkDescriptorSet 失效)
     if (context.pool != VK_NULL_HANDLE) {
-      vkResetDescriptorPool(m_device->getLogicalDevice(), context.pool, 0);
+      vkResetDescriptorPool(m_device.getLogicalDevice(), context.pool, 0);
     }
 
     // 2. 清空所有的逻辑记录

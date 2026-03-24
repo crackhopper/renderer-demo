@@ -13,14 +13,10 @@ class VulkanResourceManager;
 class VulkanCommandBuffer {
 public:
   VulkanCommandBuffer(VkCommandBuffer handle, VulkanDevice &device)
-      : m_handle(handle), m_device(&device) {}
+      : m_handle(handle), m_device(device) {}
   ~VulkanCommandBuffer() = default;
 
   VkCommandBuffer getHandle() const { return m_handle; }
-
-  void setResourceManager(VulkanResourceManager &mgr) {
-    m_resourceManager = &mgr;
-  }
 
   void beginRenderPass(VkRenderPass renderPass, VkFramebuffer framebuffer,
                       VkExtent2D extent, const std::vector<VkClearValue> &clearValues);
@@ -31,7 +27,7 @@ public:
 
   void bindPipeline(VulkanPipelineBase &pipeline);
 
-  void bindResources(VulkanPipelineBase &pipeline, const RenderItem &item);
+  void bindResources(VulkanResourceManager &resourceManager, VulkanPipelineBase &pipeline, const RenderItem &item);
 
   void drawItem(const RenderItem &item);
 
@@ -70,12 +66,13 @@ public:
 
 private:
   VkCommandBuffer m_handle = VK_NULL_HANDLE;
-  class VulkanDevice *m_device = nullptr;
-  VulkanResourceManager *m_resourceManager = nullptr;
+  VulkanDevice &m_device;
 
   // Captured from the last bound pipeline; used by drawItem().
   VkPipelineLayout m_pipelineLayout = VK_NULL_HANDLE;
   PushConstantDetails m_pushConstantsDetails{};
 };
+
+using VulkanCommandBufferPtr = std::unique_ptr<VulkanCommandBuffer>;
 
 } // namespace LX_core::graphic_backend

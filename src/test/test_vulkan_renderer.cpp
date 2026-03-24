@@ -53,7 +53,7 @@ int main() {
     auto renderer =
         std::make_shared<LX_core::graphic_backend::VulkanRenderer>(
             LX_core::graphic_backend::VulkanRenderer::Token{});
-    renderer->initialize(window);
+    renderer->initialize(window, "TestVulkanRenderer");
 
     auto vertexBufferPtr = LX_core::VertexBuffer<
         LX_core::VertexPosNormalUvBone>::create(

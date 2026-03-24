@@ -2,7 +2,9 @@
 #include "core/resources/vertex_buffer.hpp"
 #include "graphics_backend/vulkan/details/vk_resource_manager.hpp"
 #include "graphics_backend/vulkan/details/vk_device.hpp"
+#include "graphics_backend/vulkan/details/commands/vkc_cmdbuffer_manager.hpp"
 #include "graphics_backend/vulkan/details/resources/vkr_buffer.hpp"
+#include "infra/window/window.hpp"
 
 #include <filesystem>
 #include <vulkan/vulkan.h>
@@ -34,8 +36,11 @@ int main() {
   try {
     cdToWhereShadersExist();
 
+    LX_infra::Window::Initialize();
+    auto window = std::make_shared<LX_infra::Window>("Test Vulkan ResourceManager", 64, 64);
+
     auto device = LX_core::graphic_backend::VulkanDevice::create();
-    device->initialize();
+    device->initialize(window, "TestVulkanResourceManager");
 
     const VkFormat colorFormat = VK_FORMAT_B8G8R8A8_UNORM;
     const VkFormat depthFormat = VK_FORMAT_D32_SFLOAT_S8_UINT;
@@ -43,13 +48,15 @@ int main() {
     surfaceFormat.format = colorFormat;
     surfaceFormat.colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
 
+    auto cmdBufferMgr = LX_core::graphic_backend::VulkanCommandBufferManager::create(
+        *device, 3, device->getGraphicsQueueFamilyIndex());
     auto resourceManager =
         LX_core::graphic_backend::VulkanResourceManager::create(*device);
     resourceManager->initializeRenderPassAndPipeline(surfaceFormat, depthFormat);
 
-    auto *renderPass = resourceManager->getRenderPass();
-    auto *pipeline = resourceManager->getRenderPipeline();
-    if (!renderPass || !pipeline || pipeline->getHandle() == VK_NULL_HANDLE) {
+    auto &renderPass = resourceManager->getRenderPass();
+    auto &pipeline = resourceManager->getRenderPipeline();
+    if (pipeline.getHandle() == VK_NULL_HANDLE) {
       std::cerr << "RenderPass/Pipeline not initialized correctly\n";
       return 1;
     }
@@ -70,19 +77,21 @@ int main() {
 
     auto indexBufferPtr = LX_core::IndexBuffer::create({0u, 1u, 2u});
 
-    resourceManager->syncResource(vertexBufferPtr);
-    resourceManager->syncResource(indexBufferPtr);
+    resourceManager->syncResource(*cmdBufferMgr, vertexBufferPtr);
+    resourceManager->syncResource(*cmdBufferMgr, indexBufferPtr);
     resourceManager->collectGarbage();
 
-    auto *vkVertex = resourceManager->getBuffer(vertexBufferPtr->getResourceHandle());
-    auto *vkIndex = resourceManager->getBuffer(indexBufferPtr->getResourceHandle());
-    if (!vkVertex || !vkIndex) {
+    auto vkVertexOpt = resourceManager->getBuffer(vertexBufferPtr->getResourceHandle());
+    auto vkIndexOpt = resourceManager->getBuffer(indexBufferPtr->getResourceHandle());
+    if (!vkVertexOpt || !vkIndexOpt) {
       std::cerr << "Expected Vulkan buffers were not created\n";
       return 1;
     }
 
-    if (vkVertex->getHandle() == VK_NULL_HANDLE ||
-        vkIndex->getHandle() == VK_NULL_HANDLE) {
+    auto &vkVertex = vkVertexOpt->get();
+    auto &vkIndex = vkIndexOpt->get();
+    if (vkVertex.getHandle() == VK_NULL_HANDLE ||
+        vkIndex.getHandle() == VK_NULL_HANDLE) {
       std::cerr << "Vulkan buffer handles are null\n";
       return 1;
     }

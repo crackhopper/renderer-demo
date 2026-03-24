@@ -3,6 +3,7 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
 #include <functional>
+#include <iostream>
 #include <stdexcept>
 
 namespace LX_infra {
@@ -12,11 +13,15 @@ struct Window::Impl {
   int height;
   const char *title;
   SDL_Window *window = nullptr;
+  VkSurfaceKHR vkSurface = VK_NULL_HANDLE;
   std::function<void()> closeCallback;
 
   Impl(const char *t, int w, int h) : width(w), height(h), title(t) {
-    if (SDL_Init(SDL_INIT_VIDEO) != 0)
-      throw std::runtime_error(SDL_GetError());
+    if (!SDL_Init(SDL_INIT_VIDEO)) {
+      auto errorstr = SDL_GetError();
+      std::cerr << "Failed to initialize SDL: " << errorstr << "\n";
+      throw std::runtime_error(errorstr);
+    }
     window = SDL_CreateWindow(title, width, height,
                               SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
     if (!window)
@@ -38,11 +43,13 @@ struct Window::Impl {
     return false;
   }
 
-  VkSurfaceKHR getVulkanSurface(VkInstance instance) const {
-    VkSurfaceKHR surface;
-    if (!SDL_Vulkan_CreateSurface(window, instance, nullptr, &surface))
+  VkSurfaceKHR getVulkanSurface(VkInstance instance) {
+    if (vkSurface != VK_NULL_HANDLE) {
+      return vkSurface;
+    }
+    if (!SDL_Vulkan_CreateSurface(window, instance, nullptr, &vkSurface))
       throw std::runtime_error("Failed to create Vulkan surface");
-    return surface;
+    return vkSurface;
   }
 
   void getRequiredExtensions(std::vector<const char *> &extensions) const {
@@ -83,20 +90,22 @@ void Window::getRequiredExtensions(
 }
 
 VkSurfaceKHR Window::getVulkanSurface(VkInstance instance) const {
-  return pImpl->getVulkanSurface(instance);
+  return const_cast<Impl *>(pImpl)->getVulkanSurface(instance);
 }
 void Window::onClose(std::function<void()> cb) { pImpl->closeCallback = cb; }
 
-void *Window::createGraphicsHandle(GraphicsAPI api,
-                                   void *graphicsInstance) const {
+WindowGraphicsHandle
+Window::createGraphicsHandle(GraphicsAPI api,
+                             GraphicsInstanceHandle instance) const {
   if (api == GraphicsAPI::Vulkan) {
-    return new VkSurfaceKHR(getVulkanSurface(*(VkInstance *)graphicsInstance));
+    return (WindowGraphicsHandle)getVulkanSurface((VkInstance)instance);
   }
   return nullptr;
 }
 
-void Window::destroyGraphicsHandle(GraphicsAPI api, void *graphicsInstance,
-                                   void *handle) const {
+void Window::destroyGraphicsHandle(GraphicsAPI api,
+                                   GraphicsInstanceHandle instance,
+                                   WindowGraphicsHandle handle) const {
   if (api == GraphicsAPI::Vulkan && handle) {
     // Vulkan surfaces are destroyed automatically when the window is destroyed
   }

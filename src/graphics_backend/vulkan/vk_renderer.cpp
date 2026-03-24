@@ -29,21 +29,21 @@ public:
     // Window backends return an allocated handle pointer (void*) for Vulkan.
     VkInstance instance = device->getInstance();
 
+    auto graphicsIdx = device->getGraphicsQueueFamilyIndex();
+    auto presentIdx = device->getPresentQueueFamilyIndex();
+
+    // Create command buffer manager first (needed for resource manager)
+    cmdBufferMgr = VulkanCommandBufferManager::create(
+        *device, maxFramesInFlight, device->getGraphicsQueueFamilyIndex());
+
+    // Create resource manager
     resourceManager = VulkanResourceManager::create(*device);
     resourceManager->initializeRenderPassAndPipeline(device->getSurfaceFormat(),
                                                      device->getDepthFormat());
 
-    auto graphicsIdx = device->getGraphicsQueueFamilyIndex();
-    auto presentIdx = device->getPresentQueueFamilyIndex();
     swapchain = VulkanSwapchain::create(*device, device->getSurface(), device->getExtent(), graphicsIdx,
                                         presentIdx, maxFramesInFlight);
-    swapchain->initialize(*resourceManager->getRenderPass());
-
-    cmdBufferMgr = VulkanCommandBufferManager::create(
-        *device, maxFramesInFlight, device->getGraphicsQueueFamilyIndex());
-
-    // Needed for GPU-side uploads (textures).
-    resourceManager->setCommandBufferManager(*cmdBufferMgr);
+    swapchain->initialize(resourceManager->getRenderPass());
   }
   void shutdown() override { destroy(); }
 
@@ -74,20 +74,20 @@ public:
     }
 
     // Create GPU resources immediately.
-    resourceManager->syncResource(renderItem.vertexBuffer);
-    resourceManager->syncResource(renderItem.indexBuffer);
+    resourceManager->syncResource(*cmdBufferMgr, renderItem.vertexBuffer);
+    resourceManager->syncResource(*cmdBufferMgr, renderItem.indexBuffer);
     for (auto &cpuRes : renderItem.descriptorResources) {
-      resourceManager->syncResource(cpuRes);
+      resourceManager->syncResource(*cmdBufferMgr, cpuRes);
     }
     resourceManager->collectGarbage();
   }
 
   void uploadData() override {
     // Sync only dirty resources; the manager handles create/update.
-    resourceManager->syncResource(renderItem.vertexBuffer);
-    resourceManager->syncResource(renderItem.indexBuffer);
+    resourceManager->syncResource(*cmdBufferMgr, renderItem.vertexBuffer);
+    resourceManager->syncResource(*cmdBufferMgr, renderItem.indexBuffer);
     for (auto &cpuRes : renderItem.descriptorResources) {
-      resourceManager->syncResource(cpuRes);
+      resourceManager->syncResource(*cmdBufferMgr, cpuRes);
     }
     resourceManager->collectGarbage();
   }
@@ -107,31 +107,30 @@ public:
     cmdBufferMgr->beginFrame(currentFrameIndex);
     device->getDescriptorManager().beginFrame(currentFrameIndex);
 
-    VulkanCommandBuffer cmd = cmdBufferMgr->allocateBuffer();
-    cmd.setResourceManager(*resourceManager);
+    auto cmd = cmdBufferMgr->allocateBuffer();
 
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     beginInfo.flags = 0;
     beginInfo.pInheritanceInfo = nullptr;
 
-    vkBeginCommandBuffer(cmd.getHandle(), &beginInfo);
+    vkBeginCommandBuffer(cmd->getHandle(), &beginInfo);
 
-    auto *renderPass = resourceManager->getRenderPass();
-    cmd.beginRenderPass(renderPass->getHandle(),
+    auto &renderPass = resourceManager->getRenderPass();
+    cmd->beginRenderPass(renderPass.getHandle(),
                         swapchain->getFramebuffer(imageIndex).getHandle(),
-                        extent, renderPass->getClearValues());
+                        extent, renderPass.getClearValues());
 
-    cmd.setViewport(extent.width, extent.height);
-    cmd.setScissor(extent.width, extent.height);
+    cmd->setViewport(extent.width, extent.height);
+    cmd->setScissor(extent.width, extent.height);
 
-    auto *pipeline = resourceManager->getRenderPipeline();
-    cmd.bindPipeline(*pipeline);
-    cmd.bindResources(*pipeline, renderItem);
-    cmd.drawItem(renderItem);
+    auto &pipeline = resourceManager->getRenderPipeline();
+    cmd->bindPipeline(pipeline);
+    cmd->bindResources(*resourceManager, pipeline, renderItem);
+    cmd->drawItem(renderItem);
 
-    cmd.endRenderPass();
-    vkEndCommandBuffer(cmd.getHandle());
+    cmd->endRenderPass();
+    vkEndCommandBuffer(cmd->getHandle());
 
     VkSemaphore waitSemaphores[] = {
         swapchain->getImageAvailableSemaphore(currentFrameIndex)};
@@ -146,7 +145,7 @@ public:
     submitInfo.pWaitSemaphores = waitSemaphores;
     submitInfo.pWaitDstStageMask = waitStages;
     submitInfo.commandBufferCount = 1;
-    VkCommandBuffer handle = cmd.getHandle();
+    VkCommandBuffer handle = cmd->getHandle();
     submitInfo.pCommandBuffers = &handle;
     submitInfo.signalSemaphoreCount = 1;
     submitInfo.pSignalSemaphores = signalSemaphores;

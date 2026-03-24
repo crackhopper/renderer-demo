@@ -1,6 +1,7 @@
 #include "graphics_backend/vulkan/details/resources/vkr_buffer.hpp"
 #include "graphics_backend/vulkan/details/vk_device.hpp"
 #include "infra/env/env.hpp"
+#include "infra/window/window.hpp"
 #include <vulkan/vulkan.h>
 
 #include <cstdint>
@@ -10,8 +11,11 @@
 int main() {
   expSetEnvVK();
   try {
+    LX_infra::Window::Initialize();
+    auto window = std::make_shared<LX_infra::Window>("Test Vulkan Buffer", 64, 64);
+
     auto device = LX_core::graphic_backend::VulkanDevice::create();
-    device->initialize();
+    device->initialize(window, "TestVulkanBuffer");
 
     std::vector<uint32_t> indices = {0u, 1u, 2u};
     const VkDeviceSize size =

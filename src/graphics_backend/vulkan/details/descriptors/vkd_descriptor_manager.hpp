@@ -4,12 +4,15 @@
 #include <unordered_map>
 #include <vector>
 #include <vulkan/vulkan.h>
+#include "../vk_device.hpp"
 
 namespace LX_core {
 namespace graphic_backend {
 
+// VulkanDevice is fully defined via vk_device.hpp
+
 // 前置声明
-class VulkanDevice;
+class DescriptorSet;
 class DescriptorSet;
 struct PipelineSlotDetails;
 struct DescriptorLayoutKey;
@@ -59,15 +62,19 @@ public:
   size_t operator()(const DescriptorLayoutKey &key) const;
 };
 
+// 前置声明
+class VulkanDescriptorManager;
+using VulkanDescriptorManagerPtr = std::unique_ptr<VulkanDescriptorManager>;
+
 // 描述符管理器
 class VulkanDescriptorManager {
 public:
   struct Token {};
 
-  VulkanDescriptorManager(Token);
+  VulkanDescriptorManager(Token, VulkanDevice &device);
   ~VulkanDescriptorManager();
 
-  void initialize(VulkanDevice &device);
+  static VulkanDescriptorManagerPtr create(VulkanDevice &device);
 
   VkDescriptorSetLayout getOrCreateLayout(
       const std::vector<PipelineSlotDetails> &slots);
@@ -80,7 +87,7 @@ public:
   VkDevice getDeviceHandle() const;
 
 private:
-  VulkanDevice *m_device = nullptr;
+  VulkanDevice &m_device;
   uint32_t m_currentFrameIndex = 0;
   uint32_t m_maxFramesInFlight = 3;
 
@@ -103,8 +110,6 @@ private:
     uint32_t maxSets = 64;
   } m_config;
 };
-
-using VulkanDescriptorManagerPtr = std::unique_ptr<VulkanDescriptorManager>;
 
 } // namespace graphic_backend
 } // namespace LX_core

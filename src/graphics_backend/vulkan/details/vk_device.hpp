@@ -59,7 +59,9 @@ public:
   }
 
   // --- 核心管理器访问 ---
-  VulkanDescriptorManager &getDescriptorManager();
+  VulkanDescriptorManager &getDescriptorManager() {
+    return *m_descriptorManager;
+  }
 
   // --- 实用工具 ---
   uint32_t findMemoryTypeIndex(uint32_t typeFilter,
@@ -85,6 +87,7 @@ public:
                                VkImageTiling tiling,
                                VkFormatFeatureFlags features);
 
+  VkImageAspectFlags getDepthAspectMask() const;
 private:
   // 内部初始化流程
   void createInstance(const char *appName, uint32_t appVersion,
@@ -92,6 +95,7 @@ private:
                       uint32_t apiVersion);
   void createSurface();
   void pickPhysicalDevice();
+  void findSurfaceDepthFormat();
   void createLogicalDevice();
 
   struct QueueFamilyIndices {
