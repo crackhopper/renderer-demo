@@ -245,6 +245,7 @@ void VulkanSwapchain::rebuild(VkExtent2D newExtent, VulkanRenderPass &renderPass
   createImageViews();
   m_depthFormat = m_device.getDepthFormat();
   createDepthResources();
+  createSyncObjects();  // 重新创建 semaphores 和 fences
   setupFramebuffers(renderPass);
 }
 

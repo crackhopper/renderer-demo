@@ -76,7 +76,7 @@ Window::Window(const char *title, int width, int height)
 Window::~Window() { delete pImpl; }
 int Window::getWidth() const { return pImpl->width; }
 int Window::getHeight() const { return pImpl->height; }
-bool Window::shouldClose() const {
+bool Window::shouldClose() {
   bool result = pImpl->shouldClose();
   if (result && pImpl->closeCallback) {
     pImpl->closeCallback();

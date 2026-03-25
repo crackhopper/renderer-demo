@@ -68,8 +68,12 @@ public:
   std::optional<SkeletonPtr> skeleton;
   ObjectPCPtr objectPC;
 
-  RenderableSubMesh(MeshPtr<VType> mesh, MaterialPtr material)
+  RenderableSubMesh(MeshPtr<VType> mesh, MaterialPtr material,
+                    SkeletonPtr skeleton_ = nullptr)
       : mesh(mesh), material(material) {
+    if (skeleton_) {
+      skeleton = skeleton_;
+    }
     objectPC = std::make_shared<ObjectPC>(material->getPassFlag());
   }
 
@@ -88,17 +92,12 @@ public:
     }
     return ret;
   }
-  virtual ShaderPtr getShaderInfo() const {
-    return material->getShaderInfo();
-  }
-  virtual ObjectPCPtr getObjectInfo() const {
-    return objectPC;
-  }
+  virtual ShaderPtr getShaderInfo() const { return material->getShaderInfo(); }
+  virtual ObjectPCPtr getObjectInfo() const { return objectPC; }
   virtual ResourcePassFlag getPassMask() const {
     return material->getPassFlag();
   }
   virtual VertexFormat getVertexFormat() const { return VType::format(); }
 };
-
 
 } // namespace LX_core

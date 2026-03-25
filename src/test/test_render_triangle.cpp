@@ -40,16 +40,21 @@ int main() {
                             {0, 0, 0, 0}, {1.0f, 0.0f, 0.0f, 0.0f}),
   });
 
-  auto indexBufferPtr = IndexBuffer::create({0, 1, 2});
+  auto indexBufferPtr = IndexBuffer::create({0, 2, 1});
   auto meshPtr =
       Mesh<VertexPosNormalUvBone>::create(vertexBufferPtr, indexBufferPtr);
 
   // Build a renderable mesh with a material (Scene expects IRenderable).
-  auto material = std::make_shared<MaterialBlinnPhong>(ResourcePassFlag::Forward);
-  material->params->params.enableNormalMap = 0; // avoid needing correct tangents for N mapping
-  material->params->setDirty();
+  auto material = MaterialBlinnPhong::create();
+  material->ubo->params.enableNormalMap =
+      0; // avoid needing correct tangents for N mapping
+  material->ubo->setDirty();
 
-  auto renderable = std::make_shared<RenderableSubMesh<VertexPosNormalUvBone>>(meshPtr, material);
+  auto skeletonPtr = Skeleton::create({});
+
+  auto renderable = std::make_shared<RenderableSubMesh<VertexPosNormalUvBone>>(
+      meshPtr, material, skeletonPtr);
+
   auto scene = Scene::create(renderable);
   renderer->initScene(scene);
 
@@ -64,11 +69,17 @@ int main() {
   bool running = true;
   window->onClose([&running]() { running = false; });
   while (running) {
+    // 处理窗口事件，防止窗口卡住
+    if (window->shouldClose()) {
+      running = false;
+      break;
+    }
+
     // 设置摄像机矩阵
     Mat4f proj = Mat4f::perspective(45.0f, 800.0f / 600.0f, 0.1f, 100.0f);
     scene->camera->position = {0.0f, 0.0f, 3.0f};
-    scene->camera->target ={0.0f, 0.0f, 0.0f};
-    scene->camera->up=Vec3f(0.0f, 1.0f, 0.0f);
+    scene->camera->target = {0.0f, 0.0f, 0.0f};
+    scene->camera->up = Vec3f(0.0f, 1.0f, 0.0f);
 
     scene->camera->updateMatrices();
     renderer->uploadData();

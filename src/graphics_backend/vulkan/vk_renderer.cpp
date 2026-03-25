@@ -99,8 +99,20 @@ public:
     const uint32_t currentFrameIndex = frameIndex % maxFramesInFlight;
     uint32_t imageIndex = 0;
 
-    if (swapchain->acquireNextImage(currentFrameIndex, imageIndex) !=
-        VK_SUCCESS) {
+    VkResult acquireResult = swapchain->acquireNextImage(currentFrameIndex, imageIndex);
+    if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR || acquireResult == VK_SUBOPTIMAL_KHR) {
+      // Swapchain 需要重建，跳过这一帧
+      // 注意：fence 已经被 vkWaitForFences 消费，需要重置它
+      VkFence fence = swapchain->getInFlightFence(currentFrameIndex);
+      vkResetFences(device->getLogicalDevice(), 1, &fence);
+      swapchain->waitIdle();
+      swapchain->rebuild(extent, resourceManager->getRenderPass());
+      return;
+    }
+    if (acquireResult != VK_SUCCESS) {
+      // fence 已被消费但没有新的提交，重置它
+      VkFence fence = swapchain->getInFlightFence(currentFrameIndex);
+      vkResetFences(device->getLogicalDevice(), 1, &fence);
       return;
     }
 
@@ -157,7 +169,14 @@ public:
       return;
     }
 
-    swapchain->present(currentFrameIndex, imageIndex);
+    VkResult presentResult = swapchain->present(currentFrameIndex, imageIndex);
+    if (presentResult == VK_ERROR_OUT_OF_DATE_KHR || presentResult == VK_SUBOPTIMAL_KHR) {
+      // Swapchain 需要重建，跳过这一帧
+      swapchain->waitIdle();
+      swapchain->rebuild(extent, resourceManager->getRenderPass());
+      return;
+    }
+
     frameIndex++;
   }
 

@@ -86,17 +86,17 @@ int main() {
     auto indexBufferPtr = LX_core::IndexBuffer::create({0u, 1u, 2u});
     auto meshPtr = LX_core::Mesh<V>::create(vertexBufferPtr, indexBufferPtr);
 
-    auto material = std::make_shared<LX_core::MaterialBlinnPhong>(
+    auto material = LX_core::MaterialBlinnPhong::create(
         LX_core::ResourcePassFlag::Forward);
-    material->params->params.enableNormalMap = 0; // avoid normal texture
-    material->params->setDirty();
+    material->ubo->params.enableNormalMap = 0; // avoid normal texture
+    material->ubo->setDirty();
 
     auto renderable =
         std::make_shared<LX_core::RenderableSubMesh<V>>(meshPtr, material);
     // Pipeline declares a SkeletonUBO slot; attach an (empty) skeleton so the
     // descriptor set binding gets a valid buffer to update.
     renderable->skeleton =
-        std::make_shared<LX_core::Skeleton>(std::vector<LX_core::Bone>{});
+        LX_core::Skeleton::create(std::vector<LX_core::Bone>{});
     auto scene = LX_core::Scene::create(renderable);
 
     // Default directional light UBO (shader expects it).

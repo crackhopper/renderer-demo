@@ -32,6 +32,7 @@ public:
                                      WindowGraphicsHandle handle) const = 0;
 
   virtual void onClose(std::function<void()> cb) = 0;
+  virtual bool shouldClose() = 0;
 };
 using WindowPtr = std::shared_ptr<Window>;
 } // namespace LX_core

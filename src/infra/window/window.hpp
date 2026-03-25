@@ -22,7 +22,7 @@ public:
   // 暴露 Vulkan surface
   VkSurfaceKHR getVulkanSurface(VkInstance instance) const;
 
-  bool shouldClose() const;
+  bool shouldClose() override;
 
   void onClose(std::function<void()> cb) override;
 

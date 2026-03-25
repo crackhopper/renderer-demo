@@ -63,13 +63,17 @@ private:
   ResourcePassFlag m_passFlag = ResourcePassFlag::Forward;
 };
 using MaterialBlinnPhongUboPtr = std::shared_ptr<MaterialBlinnPhongUBO>;
-
+class MaterialBlinnPhong;
+using MaterialBlinnPhongPtr = std::shared_ptr<MaterialBlinnPhong>;
 class MaterialBlinnPhong : public MaterialBase {
+  class Token {};
 public:
-  MaterialBlinnPhong(ResourcePassFlag passFlag = ResourcePassFlag::Forward)
+  MaterialBlinnPhong(MaterialBlinnPhong&&) = delete; 
+  MaterialBlinnPhong(Token token,
+                     ResourcePassFlag passFlag = ResourcePassFlag::Forward)
       : m_passFlag(passFlag) {
 
-    params = std::make_shared<MaterialBlinnPhongUBO>(passFlag);
+    ubo = std::make_shared<MaterialBlinnPhongUBO>(passFlag);
 
     albedoMap = std::make_shared<CombinedTextureSampler>(
         createWhiteTexture(), PipelineSlotId::AlbedoTexture, passFlag);
@@ -80,10 +84,16 @@ public:
     shaderInfo = std::make_shared<FragmentShader>("blinnphong_0", passFlag);
   }
 
+  static MaterialBlinnPhongPtr
+  create(ResourcePassFlag passFlag = ResourcePassFlag::Forward) {
+    Token token;
+    return std::make_shared<MaterialBlinnPhong>(token, passFlag);
+  }
+
   virtual std::vector<IRenderResourcePtr>
   getDescriptorResources() const override {
     return {
-        std::dynamic_pointer_cast<IRenderResource>(params),
+        std::dynamic_pointer_cast<IRenderResource>(ubo),
         std::dynamic_pointer_cast<IRenderResource>(albedoMap),
         std::dynamic_pointer_cast<IRenderResource>(normalMap),
     };
@@ -92,7 +102,7 @@ public:
   virtual ShaderPtr getShaderInfo() const override { return shaderInfo; }
   virtual ResourcePassFlag getPassFlag() const override { return m_passFlag; }
 
-  MaterialBlinnPhongUboPtr params;
+  MaterialBlinnPhongUboPtr ubo;
   CombinedTextureSamplerPtr albedoMap;
   CombinedTextureSamplerPtr normalMap;
   ShaderPtr shaderInfo;

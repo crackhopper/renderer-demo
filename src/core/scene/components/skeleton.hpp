@@ -1,8 +1,8 @@
 #pragma once
+#include "base.hpp"
 #include "core/gpu/render_resource.hpp"
 #include "core/math/quat.hpp"
 #include "core/math/vec.hpp"
-#include "base.hpp"
 #include <cassert>
 #include <string>
 #include <vector>
@@ -81,12 +81,22 @@ private:
 };
 
 using SkeletonUboPtr = std::shared_ptr<SkeletonUBO>;
+class Skeleton;
+using SkeletonPtr = std::shared_ptr<Skeleton>;
 
-struct Skeleton : public IComponent {
-
-  Skeleton(const std::vector<Bone> &bones,
+class Skeleton : public IComponent {
+  class Token {};
+public:
+  Skeleton(Token token, const std::vector<Bone> &bones,
            ResourcePassFlag passFlag = ResourcePassFlag::Forward)
       : bones(bones), ubo(std::make_shared<SkeletonUBO>(bones, passFlag)) {}
+
+  static SkeletonPtr
+  create(const std::vector<Bone> &bones,
+         ResourcePassFlag passFlag = ResourcePassFlag::Forward) {
+    Token token;
+    return std::make_shared<Skeleton>(token, bones, passFlag);
+  }
 
   bool addBone(const Bone &bone) {
     if (bones.size() >= MAX_BONE_COUNT) {
@@ -107,7 +117,5 @@ private:
   std::vector<Bone> bones;
   SkeletonUboPtr ubo;
 };
-
-using SkeletonPtr = std::shared_ptr<Skeleton>;
 
 } // namespace LX_core
