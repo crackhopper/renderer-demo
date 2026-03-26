@@ -3,6 +3,7 @@
 #include "core/math/mat.hpp" // 假设你有 Mat4f 定义
 #include "core/math/vec.hpp" // Vec3f
 #include "components/base.hpp"
+#include <cmath>
 #include <memory>
 #include <optional>
 
@@ -82,7 +83,9 @@ public:
     ubo->param.eyePos = position;
     ubo->param.view = Mat4f::lookAt(position, target, up);
     if (type == CameraType::Perspective) {
-      ubo->param.proj = Mat4f::perspective(fovY, aspect, nearPlane, farPlane);
+      const float fovYRad = fovY * (3.14159265358979323846f / 180.0f);
+      ubo->param.proj =
+          Mat4f::perspective(fovYRad, aspect, nearPlane, farPlane);
     } else {
       ubo->param.proj =
           Mat4f::orthographic(left, right, bottom, top, nearPlane, farPlane);

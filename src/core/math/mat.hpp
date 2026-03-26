@@ -136,7 +136,12 @@ template <typename T> struct Mat4T {
   // Perspective (Vulkan style)
   // -------------------------
   static Mat4T perspective(T fovYRad, T aspect, T zNear, T zFar) {
-    Mat4T r{};
+    Mat4T r;
+    for (int c = 0; c < 4; ++c) {
+      for (int row = 0; row < 4; ++row) {
+        r.m[c][row] = T(0);
+      }
+    }
 
     T f = T(1) / std::tan(fovYRad / 2);
 
@@ -147,6 +152,7 @@ template <typename T> struct Mat4T {
     r.m[2][3] = -1;
 
     r.m[3][2] = (zFar * zNear) / (zNear - zFar);
+    r.m[3][3] = 0;
 
     return r;
   }

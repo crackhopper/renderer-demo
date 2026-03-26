@@ -7,10 +7,19 @@
 #include "../resources/vkr_buffer.hpp"
 #include "../resources/vkr_texture.hpp"
 #include <array>
+#include <cstdlib>
+#include <cstring>
 #include <stdexcept>
 #include <unordered_map>
 
 namespace LX_core::graphic_backend {
+
+namespace {
+bool envEnabled(const char *name) {
+  const char *value = std::getenv(name);
+  return value != nullptr && std::strcmp(value, "0") != 0;
+}
+} // namespace
 
 void VulkanCommandBuffer::begin() {
   VkCommandBufferBeginInfo beginInfo{};
@@ -43,9 +52,14 @@ void VulkanCommandBuffer::beginRenderPass(VkRenderPass renderPass, VkFramebuffer
 void VulkanCommandBuffer::setViewport(uint32_t width, uint32_t height) {
   VkViewport viewport{};
   viewport.x = 0.0f;
-  viewport.y = 0.0f;
   viewport.width = static_cast<float>(width);
-  viewport.height = static_cast<float>(height);
+  if (envEnabled("LX_RENDER_FLIP_VIEWPORT_Y")) {
+    viewport.y = static_cast<float>(height);
+    viewport.height = -static_cast<float>(height);
+  } else {
+    viewport.y = 0.0f;
+    viewport.height = static_cast<float>(height);
+  }
   viewport.minDepth = 0.0f;
   viewport.maxDepth = 1.0f;
   vkCmdSetViewport(m_handle, 0, 1, &viewport);
