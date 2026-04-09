@@ -184,9 +184,9 @@ VulkanPipeline::getVertexInputStateCreateInfo() {
     addAttr(1, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(VertexNormalTangent, tangent));
     break;
   case VertexFormat::BoneWeight:
-    stride = sizeof(VertexBoneWeight);
-    addAttr(0, VK_FORMAT_R32G32B32A32_SINT, offsetof(VertexBoneWeight, boneIds));
-    addAttr(1, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(VertexBoneWeight, weights));
+    stride = sizeof(VertexBoneWeightIndex);
+    addAttr(0, VK_FORMAT_R32G32B32A32_SINT, offsetof(VertexBoneWeightIndex, boneIds));
+    addAttr(1, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(VertexBoneWeightIndex, weights));
     break;
   case VertexFormat::PosNormalUvBone:
     stride = sizeof(VertexPosNormalUvBone);

@@ -1,144 +1,360 @@
 #pragma once
 #include "core/gpu/render_resource.hpp"
 #include "core/math/vec.hpp"
+#include <any>
 #include <array>
+#include <cassert>
 #include <functional>
 #include <string>
 #include <tuple>
+#include <type_traits>
 #include <unordered_map>
+#include <vector>
+
 namespace LX_core {
 
-enum class VertexFormat {
-  Pos,
-  PosColor,
-  PosUV,
-  NormalTangent,
-  BoneWeight,
-  PosNormalUvBone,
-  Custom, // 自定义，需要用户自己重载pipeline中的getVertexInputStateCreateInfo方法
+/*****************************************************************
+ * VertexFormat（仅语义标签，不再作为唯一 key）
+ *****************************************************************/
+enum class VertexFormat : uint32_t {
+  None = 0,
+  Pos = 1 << 0,
+  Color = 1 << 1,
+  UV = 1 << 2,
+  Normal = 1 << 3,
+  Tangent = 1 << 4,
+  BoneIndex = 1 << 5,
+  BoneWeight = 1 << 6,
 };
 
-template <typename Derived> struct VertexBase {
-  // operator==
-  bool operator==(const Derived &other) const {
-    return this->as_tuple() == other.as_tuple();
+inline VertexFormat operator|(VertexFormat a, VertexFormat b) {
+  return static_cast<VertexFormat>(static_cast<uint32_t>(a) |
+                                   static_cast<uint32_t>(b));
+}
+
+} // namespace LX_core
+
+// hash support
+namespace std {
+template <> struct hash<LX_core::VertexFormat> {
+  size_t operator()(LX_core::VertexFormat f) const noexcept {
+    return std::hash<uint32_t>{}(static_cast<uint32_t>(f));
+  }
+};
+} // namespace std
+
+namespace LX_core {
+
+/*****************************************************************
+ * Layout
+ *****************************************************************/
+enum class DataType { Float1, Float2, Float3, Float4, Int4 };
+enum class VertexInputRate { Vertex = 0, Instance = 1 };
+
+struct VertexLayoutItem {
+  std::string name;
+  uint32_t location = 0;
+  DataType type;
+  uint32_t size;
+  uint32_t offset;
+  VertexInputRate inputRate = VertexInputRate::Vertex;
+
+  size_t hash() const {
+    size_t h = std::hash<std::string>{}(name);
+    h ^= std::hash<uint32_t>{}(location) + 0x9e3779b9 + (h << 6) + (h >> 2);
+    h ^= std::hash<uint32_t>{}(static_cast<uint32_t>(type)) + 0x9e3779b9 +
+         (h << 6) + (h >> 2);
+    h ^= std::hash<uint32_t>{}(offset) + 0x9e3779b9 + (h << 6) + (h >> 2);
+    // 必须包含这个，否则 PSO 缓存会把实例化布局和普通布局混淆
+    h ^= std::hash<uint32_t>{}(static_cast<uint32_t>(inputRate)) + 0x9e3779b9 +
+         (h << 6) + (h >> 2);
+    return h;
   }
 
-  bool operator!=(const Derived &other) const { return !(*this == other); }
-
-  struct Hash {
-    std::size_t operator()(const Derived &v) const {
-      // Simple hash implementation - hash the address as a baseline
-      // This is a minimal implementation to get the build working
-      return std::hash<const void*>{}(static_cast<const void*>(&v));
-    }
-  };
+  bool operator==(const VertexLayoutItem &o) const {
+    return name == o.name && location == o.location && type == o.type &&
+           size == o.size && offset == o.offset && inputRate == o.inputRate;
+  }
 };
 
-struct VertexPos : VertexBase<VertexPos> {
-  Vec3f pos;
-  VertexPos(Vec3f pos) : pos(pos) {}
-  auto as_tuple() const { return std::tie(pos); }
-  static VertexFormat format() { return VertexFormat::Pos; }
-};
-
-struct VertexPosColor : VertexBase<VertexPosColor> {
-  Vec3f pos;
-  f32 padding;
-  Vec3f color;
-  VertexPosColor(Vec3f pos, Vec3f color)
-      : pos(pos), padding(0.0f), color(color) {}
-  auto as_tuple() const { return std::tie(pos); }
-  static VertexFormat format() { return VertexFormat::PosColor; }
-};
-
-struct VertexPosUV : VertexBase<VertexPosUV> {
-  Vec3f pos;
-  f32 padding;
-  Vec2f uv;
-  VertexPosUV(Vec3f pos, Vec2f uv) : pos(pos), uv(uv) {}
-  auto as_tuple() const { return std::tie(pos); }
-  static VertexFormat format() { return VertexFormat::PosUV; }
-};
-
-struct VertexNormalTangent : VertexBase<VertexNormalTangent> {
-  Vec3f normal;
-  f32 padding;
-  Vec4f tangent;
-  VertexNormalTangent(Vec3f normal, Vec4f tangent)
-      : normal(normal), padding(0.0f), tangent(tangent) {}
-
-  static VertexFormat format() { return VertexFormat::NormalTangent; }
-};
-
-struct VertexBoneWeight : VertexBase<VertexBoneWeight> {
-  Vec4i boneIds;
-  Vec4f weights;
-  VertexBoneWeight(Vec4i boneIds, Vec4f weights)
-      : boneIds(boneIds), weights(weights) {}
-  static VertexFormat format() { return VertexFormat::BoneWeight; }
-};
-
-struct VertexPosNormalUvBone : VertexBase<VertexPosNormalUvBone> {
-  Vec3f pos;
-  Vec3f normal;
-  Vec2f uv;
-  Vec4f tangent;
-  Vec4i boneIDs;
-  Vec4f boneWeights;
-  VertexPosNormalUvBone(Vec3f pos, Vec3f normal, Vec2f uv, Vec4f tangent,
-                        Vec4i boneIDs, Vec4f boneWeights)
-      : pos(pos), normal(normal), uv(uv), tangent(tangent), boneIDs(boneIDs),
-        boneWeights(boneWeights) {}
-  auto as_tuple() const { return std::tie(pos); }
-  static VertexFormat format() { return VertexFormat::PosNormalUvBone; }
-};
-
-// 顶点缓冲
-template <typename VType>
-class VertexBuffer : public IRenderResource {
+class VertexLayout {
 public:
-  VertexBuffer(std::vector<VType> &&vertices,
-               ResourcePassFlag passFlag = ResourcePassFlag::Forward)
-      : m_vertices(std::move(vertices)), m_passFlag(passFlag) {}
-  VertexBuffer(std::initializer_list<VType> list,
-               ResourcePassFlag passFlag = ResourcePassFlag::Forward)
-      : m_vertices(list), m_passFlag(passFlag) {}
+  VertexLayout() = default;
 
-  void update(const std::vector<VType> &vertices) {
-    m_vertices = vertices;
-    setDirty();
+  VertexLayout(std::vector<VertexLayoutItem> items, uint32_t stride)
+      : m_items(std::move(items)), m_stride(stride) {
+    updateHash();
   }
 
-  size_t vertexCount() const { return m_vertices.size(); }
+  const std::vector<VertexLayoutItem> &getItems() const { return m_items; }
+  uint32_t getStride() const { return m_stride; }
+  size_t getHash() const { return m_hash; }
 
-  ResourcePassFlag getPassFlag() const override {
-    return m_passFlag;
+  bool operator==(const VertexLayout &o) const {
+    return m_hash == o.m_hash && m_items == o.m_items && m_stride == o.m_stride;
   }
-  ResourceType getType() const override {
+
+private:
+  void updateHash() {
+    m_hash = 0;
+    for (auto &i : m_items) {
+      size_t h = i.hash();
+      m_hash ^= h + 0x9e3779b9 + (m_hash << 6) + (m_hash >> 2);
+    }
+    m_hash ^= std::hash<uint32_t>{}(m_stride);
+  }
+
+private:
+  std::vector<VertexLayoutItem> m_items;
+  uint32_t m_stride = 0;
+  size_t m_hash = 0;
+};
+
+} // namespace LX_core
+
+namespace std {
+template <> struct hash<LX_core::VertexLayout> {
+  size_t operator()(const LX_core::VertexLayout &l) const {
+    return l.getHash();
+  }
+};
+} // namespace std
+
+namespace LX_core {
+
+/*****************************************************************
+ * VertexBuffer
+ *****************************************************************/
+class IVertexBuffer : public IRenderResource {
+public:
+  virtual ~IVertexBuffer() = default;
+
+  virtual const VertexLayout &getLayout() const = 0;
+  virtual size_t getLayoutHash() { return getLayout().getHash(); }
+
+  virtual uint32_t getVertexCount() const = 0;
+
+  virtual const void *getRawData() const = 0;
+  virtual void *getRawDataMutable() = 0;
+  virtual u32 getByteSize() const = 0;
+
+  virtual ResourceType getType() const override {
     return ResourceType::VertexBuffer;
   }
-  const void *getRawData() const override { return m_vertices.data(); }
-  u32 getByteSize() const override { return m_vertices.size() * sizeof(VType); }
-
-  static VertexFormat getVertexFormat() { return VType::format(); }
-
-  VertexFormat getFormat() const { return VType::format(); }
-
-  static auto create(std::vector<VType> &&vertices,
-                    ResourcePassFlag passFlag = ResourcePassFlag::Forward) {
-    return std::make_shared<VertexBuffer>(std::move(vertices), passFlag);
-  }
-  static auto create(std::initializer_list<VType> list,
-                    ResourcePassFlag passFlag = ResourcePassFlag::Forward) {
-    return std::make_shared<VertexBuffer>(list, passFlag);
-  }
-private:
-  std::vector<VType> m_vertices;
-  ResourcePassFlag m_passFlag = ResourcePassFlag::Forward;
 };
 
-template <typename VType>
-using VertexBufferPtr = std::shared_ptr<VertexBuffer<VType>>;
+template <typename VType> class VertexBuffer final : public IVertexBuffer {
+  static_assert(std::is_standard_layout_v<VType>,
+                "Vertex must be standard layout");
+  static_assert(std::is_trivially_copyable_v<VType>,
+                "Vertex must be trivially copyable");
+
+public:
+  explicit VertexBuffer(std::vector<VType> &&v) : m_vertices(std::move(v)) {}
+
+  const VertexLayout &getLayout() const override {
+    static const VertexLayout layout = VType::getLayout();
+    return layout;
+  }
+
+  uint32_t getVertexCount() const override {
+    return static_cast<uint32_t>(m_vertices.size());
+  }
+
+  const void *getRawData() const override { return m_vertices.data(); }
+  void *getRawDataMutable() override { return m_vertices.data(); }
+
+  u32 getByteSize() const override {
+    return (u32)(m_vertices.size() * sizeof(VType));
+  }
+
+private:
+  std::vector<VType> m_vertices;
+};
+
+/*****************************************************************
+ * Factory
+ *****************************************************************/
+using VertexBufferPtr = std::shared_ptr<IVertexBuffer>;
+
+class VertexFactory {
+public:
+  using Creator = std::function<VertexBufferPtr(std::any &&rawData)>;
+
+  template <typename VType> static void registerType() {
+    const auto &layout = VType::getLayout();
+    size_t key = layout.getHash();
+
+    getMap()[key] = {
+        layout, sizeof(VType), [](std::any &&rawData) -> VertexBufferPtr {
+          // 核心：通过 any_cast 还原 vector 并利用移动构造函数
+          // 此时数据的所有权被从 any 转移到了 v 中，实现零拷贝
+          try {
+            auto v = std::any_cast<std::vector<VType>>(std::move(rawData));
+            return std::make_shared<VertexBuffer<VType>>(std::move(v));
+          } catch (const std::bad_any_cast &) {
+            // 这里通常不会发生，除非 Factory 逻辑出错
+            assert(false && "VertexFactory: Type mismatch in any_cast");
+            return nullptr;
+          }
+        }};
+  }
+
+  /**
+   * @brief 零拷贝创建方法
+   * 接收右值引用，强制所有权转移
+   */
+  template <typename VType>
+  static VertexBufferPtr create(std::vector<VType> &&v) {
+    auto &m = getMap();
+    size_t key = VType::getLayout().getHash();
+
+    auto it = m.find(key);
+    if (it != m.end()) {
+      // 将 vector 包装进 any 并移动进去
+      return it->second.creator(
+          std::make_any<std::vector<VType>>(std::move(v)));
+    }
+
+    // 如果没找到，尝试动态注册（可选）
+    // registerType<VType>();
+    // return create(std::move(v));
+
+    return nullptr;
+  }
+
+private:
+  struct Entry {
+    VertexLayout layout;
+    size_t stride;
+    Creator creator;
+  };
+
+  static std::unordered_map<size_t, Entry> &getMap() {
+    static std::unordered_map<size_t, Entry> m;
+    return m;
+  }
+};
+
+/*****************************************************************
+ * Vertex定义
+ *****************************************************************/
+template <typename T> struct VertexBase {
+  bool operator==(const T &o) const {
+    return std::memcmp(this, &o, sizeof(T)) == 0;
+  }
+};
+
+/**************** 常用顶点格式 ****************/
+
+struct VertexPos {
+  Vec3f pos;
+
+  static const VertexLayout &getLayout() {
+    static VertexLayout layout = {{
+                                      {"inPos", 0, DataType::Float3,
+                                       sizeof(Vec3f), offsetof(VertexPos, pos)},
+                                  },
+                                  sizeof(VertexPos)};
+    return layout;
+  }
+};
+
+struct VertexPosColor {
+  Vec3f pos;
+  Vec4f color;
+
+  static const VertexLayout &getLayout() {
+    static VertexLayout layout = {
+        {
+            {"inPos", 0, DataType::Float3, sizeof(Vec3f),
+             offsetof(VertexPosColor, pos)},
+            {"inColor", 1, DataType::Float4, sizeof(Vec4f),
+             offsetof(VertexPosColor, color)},
+        },
+        sizeof(VertexPosColor)};
+    return layout;
+  }
+};
+
+struct VertexPosUV {
+  Vec3f pos;
+  Vec2f uv;
+
+  static const VertexLayout &getLayout() {
+    static VertexLayout layout = {
+        {
+            {"inPos", 0, DataType::Float3, sizeof(Vec3f),
+             offsetof(VertexPosUV, pos)},
+            {"inUV", 1, DataType::Float2, sizeof(Vec2f),
+             offsetof(VertexPosUV, uv)},
+        },
+        sizeof(VertexPosUV)};
+    return layout;
+  }
+};
+
+// PBR 顶点 (Pos + Normal + UV + Tangent)
+struct VertexPBR : VertexBase<VertexPBR> {
+  Vec3f pos;
+  Vec3f normal;
+  Vec2f uv;
+  Vec4f tangent; // w分量通常用于存储副法线方向(bitangent sign)
+
+  static const VertexLayout &getLayout() {
+    static VertexLayout layout = {
+        {{"inPos", 0, DataType::Float3, sizeof(Vec3f),
+          offsetof(VertexPBR, pos)},
+         {"inNormal", 1, DataType::Float3, sizeof(Vec3f),
+          offsetof(VertexPBR, normal)},
+         {"inUV", 2, DataType::Float2, sizeof(Vec2f), offsetof(VertexPBR, uv)},
+         {"inTangent", 3, DataType::Float4, sizeof(Vec4f),
+          offsetof(VertexPBR, tangent)}},
+        sizeof(VertexPBR)};
+    return layout;
+  }
+};
+
+// 骨骼动画顶点 (Pos + Normal + UV + BoneIDs + Weights)
+struct VertexSkinned : VertexBase<VertexSkinned> {
+  Vec3f pos;
+  Vec3f normal;
+  Vec2f uv;
+  Vec4i boneIds; // 4个骨骼索引
+  Vec4f weights; // 4个权重
+
+  static const VertexLayout &getLayout() {
+    static VertexLayout layout = {
+        {{"inPos", 0, DataType::Float3, sizeof(Vec3f),
+          offsetof(VertexSkinned, pos)},
+         {"inNormal", 1, DataType::Float3, sizeof(Vec3f),
+          offsetof(VertexSkinned, normal)},
+         {"inUV", 2, DataType::Float2, sizeof(Vec2f),
+          offsetof(VertexSkinned, uv)},
+         {"inBoneIds", 3, DataType::Int4, sizeof(Vec4i),
+          offsetof(VertexSkinned, boneIds)},
+         {"inWeights", 4, DataType::Float4, sizeof(Vec4f),
+          offsetof(VertexSkinned, weights)}},
+        sizeof(VertexSkinned)};
+    return layout;
+  }
+};
+
+// UI/2D 顶点 (Pos + UV + Color)
+struct VertexUI : VertexBase<VertexUI> {
+  Vec2f pos;
+  Vec2f uv;
+  Vec4f color; // 带有透明度的 UI 颜色
+
+  static const VertexLayout &getLayout() {
+    static VertexLayout layout = {
+        {{"inPos", 0, DataType::Float2, sizeof(Vec2f), offsetof(VertexUI, pos)},
+         {"inUV", 1, DataType::Float2, sizeof(Vec2f), offsetof(VertexUI, uv)},
+         {"inColor", 2, DataType::Float4, sizeof(Vec4f),
+          offsetof(VertexUI, color)}},
+        sizeof(VertexUI)};
+    return layout;
+  }
+};
 
 } // namespace LX_core

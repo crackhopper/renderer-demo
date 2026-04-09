@@ -1,53 +1,187 @@
 #pragma once
 #include "core/gpu/render_resource.hpp"
-#include "core/platform/types.hpp"
+#include <algorithm>
+#include <functional>
 #include <memory>
+#include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace LX_core {
 
-class Shader : public IRenderResource {
+/*****************************************************************
+ * hash helper
+ *****************************************************************/
+template <class T> inline void hash_combine(std::size_t &seed, const T &v) {
+  std::hash<T> hasher;
+  seed ^= hasher(v) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+}
+
+/*****************************************************************
+ * Shader enums
+ *****************************************************************/
+enum class ShaderPropertyType {
+  Float,
+  Vec2,
+  Vec3,
+  Vec4,
+  Mat4,
+
+  UniformBuffer,
+  StorageBuffer,
+
+  Texture2D,
+  TextureCube,
+  Sampler
+};
+
+/*****************************************************************
+ * ShaderStage（改为 bitmask）
+ *****************************************************************/
+enum class ShaderStage : uint32_t {
+  None = 0,
+  Vertex = 1 << 0,
+  Fragment = 1 << 1,
+  Compute = 1 << 2,
+  Geometry = 1 << 3,
+  TessControl = 1 << 4,
+  TessEval = 1 << 5,
+};
+
+inline ShaderStage operator|(ShaderStage a, ShaderStage b) {
+  return static_cast<ShaderStage>(static_cast<uint32_t>(a) |
+                                  static_cast<uint32_t>(b));
+}
+
+/*****************************************************************
+ * Reflection Binding
+ *****************************************************************/
+struct ShaderResourceBinding {
+  std::string name;
+
+  uint32_t set = 0;
+  uint32_t binding = 0;
+
+  ShaderPropertyType type;
+
+  uint32_t descriptorCount = 1;
+  uint32_t size = 0;
+  uint32_t offset = 0;
+
+  ShaderStage stageFlags = ShaderStage::None;
+
+  bool operator==(const ShaderResourceBinding &rhs) const {
+    return set == rhs.set && binding == rhs.binding && type == rhs.type &&
+           descriptorCount == rhs.descriptorCount;
+  }
+};
+
+/*****************************************************************
+ * Shader Stage Code
+ *****************************************************************/
+struct ShaderStageCode {
+  ShaderStage stage;
+  std::vector<uint32_t> bytecode;
+};
+
+/*****************************************************************
+ * IShader
+ *****************************************************************/
+class IShader : public IRenderResource {
 public:
-  Shader(const std::string &shaderName, ResourcePassFlag passFlag)
-      : m_shaderName(shaderName), m_passFlag(passFlag) {}
+  virtual ~IShader() = default;
 
-  virtual ResourcePassFlag getPassFlag() const override { return m_passFlag; }
-  virtual const void *getRawData() const override {
-    return nullptr;
+  virtual const std::vector<ShaderStageCode> &getAllStages() const = 0;
+
+  virtual const std::vector<ShaderResourceBinding> &
+  getReflectionBindings() const = 0;
+
+  /// ⭐ 快速查找（推荐）
+  virtual std::optional<std::reference_wrapper<const ShaderResourceBinding>>
+  findBinding(uint32_t set, uint32_t binding) const = 0;
+
+  /// fallback
+  virtual std::optional<std::reference_wrapper<const ShaderResourceBinding>>
+  findBinding(const std::string &name) const = 0;
+
+  virtual size_t getProgramHash() const = 0;
+
+  ResourceType getType() const override { return ResourceType::Shader; }
+};
+
+using IShaderPtr = std::shared_ptr<IShader>;
+
+/*****************************************************************
+ * Shader Variant
+ *****************************************************************/
+struct ShaderVariant {
+  std::string macroName;
+  bool enabled = false;
+
+  bool operator==(const ShaderVariant &rhs) const {
+    return enabled == rhs.enabled && macroName == rhs.macroName;
   }
-  virtual u32 getByteSize() const override {
-    return 0;
+};
+
+/*****************************************************************
+ * Shader Program Set
+ *****************************************************************/
+struct ShaderProgramSet {
+  std::string shaderName;
+  std::vector<ShaderVariant> variants;
+
+  size_t getHash() const {
+    if (!m_dirty)
+      return m_cachedHash;
+
+    recomputeHash();
+    return m_cachedHash;
   }
 
-  std::string getShaderName() const { return m_shaderName; }
+  void markDirty() { m_dirty = true; }
+
+  bool operator==(const ShaderProgramSet &rhs) const {
+    return getHash() == rhs.getHash();
+  }
+
+  IShaderPtr getShader() const;
 
 private:
-  std::string m_shaderName;
-  ResourcePassFlag m_passFlag = ResourcePassFlag::Forward;
+  void recomputeHash() const {
+    size_t h = std::hash<std::string>{}(shaderName);
+
+    // 收集 enabled
+    std::vector<std::string> enabled;
+    enabled.reserve(variants.size());
+
+    for (const auto &v : variants) {
+      if (v.enabled)
+        enabled.push_back(v.macroName);
+    }
+
+    std::sort(enabled.begin(), enabled.end());
+
+    for (const auto &m : enabled)
+      hash_combine(h, m);
+
+    m_cachedHash = h;
+    m_dirty = false;
+  }
+  mutable size_t m_cachedHash = 0;
+  mutable bool m_dirty = true;
 };
-using ShaderPtr = std::shared_ptr<Shader>;
-
-
-class VertexShader : public Shader {
-public:
-  VertexShader(const std::string &shaderName, ResourcePassFlag passFlag)
-      : Shader(shaderName, passFlag) {}
-
-  virtual ResourceType getType() const override {
-    return ResourceType::VertexShader;
-  }      
-};
-
-class FragmentShader : public Shader {
-public:
-  FragmentShader(const std::string &shaderName, ResourcePassFlag passFlag)
-      : Shader(shaderName, passFlag) {}
-
-  virtual ResourceType getType() const override {
-    return ResourceType::FragmentShader;
-  }      
-};
-
 
 } // namespace LX_core
+
+namespace std {
+template <> struct hash<LX_core::ShaderResourceBinding> {
+  size_t operator()(const LX_core::ShaderResourceBinding &b) const {
+    size_t h = std::hash<std::string>{}(b.name);
+    LX_core::hash_combine(h, b.set);
+    LX_core::hash_combine(h, b.binding);
+    LX_core::hash_combine(h, static_cast<uint32_t>(b.stageFlags));
+    return h;
+  }
+};
+} // namespace std

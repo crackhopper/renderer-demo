@@ -182,6 +182,10 @@ template <typename T> struct Vec4 : VecBase<Vec4<T>, T, 4> {
   };
   Vec4() = default;
   Vec4(T x, T y, T z, T w) : data{x, y, z, w} {}
+  /**
+   * @brief 将 Vec4 转换为 Vec3f
+   */
+  Vec3f toVec3() const { return Vec3f(x / w, y / w, z / w); }
 };
 
 // ===================== 类型别名 =====================
