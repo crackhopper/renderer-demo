@@ -1,5 +1,6 @@
 #pragma once
 #include "core/gpu/render_resource.hpp"
+#include "core/utils/string_table.hpp"
 #include <algorithm>
 #include <functional>
 #include <memory>
@@ -13,7 +14,8 @@ namespace LX_core {
 /*****************************************************************
  * hash helper
  *****************************************************************/
-template <class T> inline void hash_combine(std::size_t &seed, const T &v) {
+template <class T>
+inline void hash_combine(std::size_t &seed, const T &v) {
   std::hash<T> hasher;
   seed ^= hasher(v) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
 }
@@ -27,6 +29,7 @@ enum class ShaderPropertyType {
   Vec3,
   Vec4,
   Mat4,
+  Int,
 
   UniformBuffer,
   StorageBuffer,
@@ -34,6 +37,16 @@ enum class ShaderPropertyType {
   Texture2D,
   TextureCube,
   Sampler
+};
+
+/*****************************************************************
+ * StructMemberInfo — std140 layout of a single UBO struct member
+ *****************************************************************/
+struct StructMemberInfo {
+  std::string name;        // GLSL member name (e.g. "baseColor")
+  ShaderPropertyType type; // Float / Int / Vec2 / Vec3 / Vec4 / Mat4
+  uint32_t offset = 0;     // std140 byte offset within the block
+  uint32_t size = 0;       // std140 declared byte size of this member
 };
 
 /*****************************************************************
@@ -70,6 +83,12 @@ struct ShaderResourceBinding {
   uint32_t offset = 0;
 
   ShaderStage stageFlags = ShaderStage::None;
+
+  /// std140 layout of the UBO block's top-level members.
+  /// Populated only when `type == ShaderPropertyType::UniformBuffer` and the
+  /// block shape is flat (no nested structs / arrays-of-struct). Empty
+  /// otherwise. Members are kept in spirv-cross's declared order.
+  std::vector<StructMemberInfo> members;
 
   bool operator==(const ShaderResourceBinding &rhs) const {
     return set == rhs.set && binding == rhs.binding && type == rhs.type &&
@@ -143,7 +162,24 @@ struct ShaderProgramSet {
     return m_cachedHash;
   }
 
-  size_t getPipelineHash() const { return getHash(); }
+  StringID getRenderSignature() const {
+    auto &tbl = GlobalStringTable::get();
+    std::vector<std::string> enabled;
+    enabled.reserve(variants.size());
+    for (const auto &v : variants) {
+      if (v.enabled)
+        enabled.push_back(v.macroName);
+    }
+    std::sort(enabled.begin(), enabled.end());
+
+    std::vector<StringID> parts;
+    parts.reserve(1 + enabled.size());
+    parts.push_back(tbl.Intern(shaderName));
+    for (const auto &m : enabled)
+      parts.push_back(tbl.Intern(m));
+
+    return tbl.compose(TypeTag::ShaderProgram, parts);
+  }
 
   void markDirty() { m_dirty = true; }
 
@@ -181,7 +217,8 @@ private:
 } // namespace LX_core
 
 namespace std {
-template <> struct hash<LX_core::ShaderResourceBinding> {
+template <>
+struct hash<LX_core::ShaderResourceBinding> {
   size_t operator()(const LX_core::ShaderResourceBinding &b) const {
     size_t h = std::hash<std::string>{}(b.name);
     LX_core::hash_combine(h, b.set);

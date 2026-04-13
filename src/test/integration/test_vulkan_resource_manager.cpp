@@ -1,14 +1,14 @@
+#include "backend/vulkan/details/commands/vkc_cmdbuffer_manager.hpp"
+#include "backend/vulkan/details/resources/vkr_buffer.hpp"
+#include "backend/vulkan/details/vk_device.hpp"
+#include "backend/vulkan/details/vk_resource_manager.hpp"
 #include "core/resources/index_buffer.hpp"
 #include "core/resources/vertex_buffer.hpp"
 #include "core/scene/scene.hpp"
-#include "core/utils/filesystem_tools.hpp"
-#include "backend/vulkan/details/vk_resource_manager.hpp"
-#include "backend/vulkan/details/vk_device.hpp"
-#include "backend/vulkan/details/commands/vkc_cmdbuffer_manager.hpp"
-#include "backend/vulkan/details/resources/vkr_buffer.hpp"
-#include "infra/loaders/blinnphong_draw_material_loader.hpp"
-#include "infra/window/window.hpp"
 #include "core/utils/env.hpp"
+#include "core/utils/filesystem_tools.hpp"
+#include "infra/loaders/blinnphong_material_loader.hpp"
+#include "infra/window/window.hpp"
 
 #include <vulkan/vulkan.h>
 
@@ -24,7 +24,8 @@ int main() {
     }
 
     LX_infra::Window::Initialize();
-    auto window = std::make_shared<LX_infra::Window>("Test Vulkan ResourceManager", 64, 64);
+    auto window = std::make_shared<LX_infra::Window>(
+        "Test Vulkan ResourceManager", 64, 64);
 
     auto device = LX_core::backend::VulkanDevice::create();
     device->initialize(window, "TestVulkanResourceManager");
@@ -36,21 +37,18 @@ int main() {
         *device, 3, device->getGraphicsQueueFamilyIndex());
     auto resourceManager =
         LX_core::backend::VulkanResourceManager::create(*device);
-    resourceManager->initializeRenderPassAndPipeline(surfaceFormat, depthFormat);
+    resourceManager->initializeRenderPassAndPipeline(surfaceFormat,
+                                                     depthFormat);
 
     using V = LX_core::VertexPosNormalUvBone;
-    auto vertexBufferPtr = LX_core::VertexBuffer<V>::create(
-        {
-            V({-5.0f, 5.0f, 0.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f},
-              {1.0f, 0.0f, 0.0f, 0.0f}, {0, 0, 0, 0},
-              {1.0f, 0.0f, 0.0f, 0.0f}),
-            V({5.0f, 5.0f, 0.0f}, {0.0f, 0.0f, 1.0f}, {1.0f, 0.0f},
-              {1.0f, 0.0f, 0.0f, 0.0f}, {0, 0, 0, 0},
-              {1.0f, 0.0f, 0.0f, 0.0f}),
-            V({5.0f, -5.0f, 0.0f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f},
-              {1.0f, 0.0f, 0.0f, 0.0f}, {0, 0, 0, 0},
-              {1.0f, 0.0f, 0.0f, 0.0f}),
-        });
+    auto vertexBufferPtr = LX_core::VertexBuffer<V>::create({
+        V({-5.0f, 5.0f, 0.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f},
+          {1.0f, 0.0f, 0.0f, 0.0f}, {0, 0, 0, 0}, {1.0f, 0.0f, 0.0f, 0.0f}),
+        V({5.0f, 5.0f, 0.0f}, {0.0f, 0.0f, 1.0f}, {1.0f, 0.0f},
+          {1.0f, 0.0f, 0.0f, 0.0f}, {0, 0, 0, 0}, {1.0f, 0.0f, 0.0f, 0.0f}),
+        V({5.0f, -5.0f, 0.0f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f},
+          {1.0f, 0.0f, 0.0f, 0.0f}, {0, 0, 0, 0}, {1.0f, 0.0f, 0.0f, 0.0f}),
+    });
 
     auto indexBufferPtr = LX_core::IndexBuffer::create({0u, 1u, 2u});
 
@@ -59,19 +57,21 @@ int main() {
     resourceManager->collectGarbage();
 
     auto meshPtr = LX_core::Mesh::create(vertexBufferPtr, indexBufferPtr);
-    auto material = LX_infra::loadBlinnPhongDrawMaterial();
+    auto material = LX_infra::loadBlinnPhongMaterial();
     auto renderable = std::make_shared<LX_core::RenderableSubMesh>(
         meshPtr, material, LX_core::Skeleton::create({}));
     auto scene = LX_core::Scene::create(renderable);
-    auto item = scene->buildRenderingItem();
+    auto item = scene->buildRenderingItem(LX_core::Pass_Forward);
     auto &pipeline = resourceManager->getOrCreateRenderPipeline(item);
     if (pipeline.getHandle() == VK_NULL_HANDLE) {
       std::cerr << "Pipeline not created correctly\n";
       return 1;
     }
 
-    auto vkVertexOpt = resourceManager->getBuffer(vertexBufferPtr->getResourceHandle());
-    auto vkIndexOpt = resourceManager->getBuffer(indexBufferPtr->getResourceHandle());
+    auto vkVertexOpt =
+        resourceManager->getBuffer(vertexBufferPtr->getResourceHandle());
+    auto vkIndexOpt =
+        resourceManager->getBuffer(indexBufferPtr->getResourceHandle());
     if (!vkVertexOpt || !vkIndexOpt) {
       std::cerr << "Expected Vulkan buffers were not created\n";
       return 1;
@@ -91,4 +91,3 @@ int main() {
     return 0;
   }
 }
-

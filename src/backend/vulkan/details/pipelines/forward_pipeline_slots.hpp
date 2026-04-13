@@ -18,8 +18,11 @@ inline std::vector<PipelineSlotDetails> blinnPhongForwardSlots() {
        PipelineSlotStage::ALL, 0, 0, DirectionalLightUBO::ResourceSize},
       {PipelineSlotId::CameraUBO, ResourceType::UniformBuffer,
        PipelineSlotStage::ALL, 1, 0, CameraUBO::ResourceSize},
+      // TODO(REQ-003b): 32 is the reflected std140 size of blinnphong_0's
+      // MaterialUBO (vec3 + float + float + 3*int = 32B). This literal will be
+      // replaced once PipelineBuildInfo sources layout from shader reflection.
       {PipelineSlotId::MaterialUBO, ResourceType::UniformBuffer,
-       PipelineSlotStage::FRAGMENT, 2, 0, BlinnPhongMaterialUBO::ResourceSize},
+       PipelineSlotStage::FRAGMENT, 2, 0, 32},
       {PipelineSlotId::AlbedoTexture, ResourceType::CombinedImageSampler,
        PipelineSlotStage::FRAGMENT, 2, 1, 0},
       {PipelineSlotId::NormalTexture, ResourceType::CombinedImageSampler,

@@ -383,4 +383,15 @@ PipelineKey(
 
 ## 实施状态
 
-未开始。
+已完成（2026-04-13）— 通过 openspec 变更 `interning-pipeline-identity` 落地。
+
+- 全部 11 个任务组、50+ 子任务完成，`openspec validate --strict` 通过
+- `src/core/scene/pass.hpp` — `Pass_Forward / Pass_Deferred / Pass_Shadow` 常量
+- 各资源的 `getRenderSignature(...)`：`VertexLayoutItem/Layout`、`topologySignature`、`Mesh`、`Skeleton`、`ShaderProgramSet`、`RenderState`、`RenderPassEntry`、`MaterialTemplate::getRenderPassSignature`、`MaterialInstance`、`RenderableSubMesh`
+- `PipelineKey::build(StringID, StringID)` 两级 compose；旧四参重载、`variantSegment()` 辅助、`kSkeletonPipelineHashTag` 全部删除
+- `MaterialTemplate::m_passes` 迁移到 `unordered_map<StringID, RenderPassEntry, StringID::Hash>`；`setPass` / `getEntry` 改签名
+- `Scene::buildRenderingItem(StringID pass)`，`RenderingItem` 新增 `pass` 字段
+- 6 个调用点全量迁移：`blinnphong_material_loader`、`test_material_instance`、`vk_renderer`、`test_vulkan_{pipeline,resource_manager,command_buffer}`
+- 新增 `src/test/integration/test_pipeline_identity.cpp`，6 条用例覆盖相同配置/variant/topology/skeleton/pass/toDebugString，全部通过
+- 无回归：`test_string_table` / `test_material_instance` / 全量 cmake build 绿
+- `finished/001-*.md`、`.../002-*.md` 的 Superseded banner 已存在（前次 session 添加）

@@ -8,6 +8,9 @@ set(TEST_INTEGRATION_EXE_LIST
   test_vulkan_texture
   test_vulkan_shader
   test_vulkan_resource_manager
+  test_string_table
+  test_material_instance
+  test_pipeline_identity
 
   # test_render_sphere
   # test_render_model

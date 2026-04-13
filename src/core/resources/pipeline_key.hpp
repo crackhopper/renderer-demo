@@ -1,15 +1,13 @@
 #pragma once
 
-#include "core/resources/material.hpp"
-#include "core/resources/mesh.hpp"
-#include "core/resources/shader.hpp"
-#include "core/resources/skeleton.hpp"
 #include "core/utils/string_table.hpp"
-#include <sstream>
-#include <string>
 
 namespace LX_core {
 
+/// PipelineKey 是 pipeline identity 的句柄：一个结构化 `StringID`，
+/// 由 `GlobalStringTable::compose(TypeTag::PipelineKey, {objSig, matSig})`
+/// 生成。 调用 `GlobalStringTable::toDebugString(key.id)`
+/// 可以还原出完整的人类可读 pipeline tree，用于日志和调试断言。
 struct PipelineKey {
   StringID id;
 
@@ -22,11 +20,10 @@ struct PipelineKey {
     }
   };
 
-  /// Assemble identity by querying getPipelineHash() on each participating
-  /// resource. `skeleton` may be null (contributes 0 — no skinning).
-  static PipelineKey build(const ShaderProgramSet &shaderSet, const Mesh &mesh,
-                           const RenderState &renderState,
-                           const SkeletonPtr &skeleton);
+  /// 两级 compose：object signature + material signature。调用方通过
+  /// `IRenderable::getRenderSignature(pass)` 与
+  /// `IMaterial::getRenderSignature(pass)` 先各自组装结构化签名，再传入本函数。
+  static PipelineKey build(StringID objectSig, StringID materialSig);
 };
 
 } // namespace LX_core

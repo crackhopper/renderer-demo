@@ -1,12 +1,12 @@
+#include "backend/vulkan/details/vk_device.hpp"
+#include "backend/vulkan/details/vk_resource_manager.hpp"
 #include "core/resources/index_buffer.hpp"
 #include "core/resources/vertex_buffer.hpp"
 #include "core/scene/scene.hpp"
-#include "core/utils/filesystem_tools.hpp"
-#include "backend/vulkan/details/vk_device.hpp"
-#include "backend/vulkan/details/vk_resource_manager.hpp"
-#include "infra/loaders/blinnphong_draw_material_loader.hpp"
-#include "infra/window/window.hpp"
 #include "core/utils/env.hpp"
+#include "core/utils/filesystem_tools.hpp"
+#include "infra/loaders/blinnphong_material_loader.hpp"
+#include "infra/window/window.hpp"
 
 #include <iostream>
 
@@ -26,7 +26,8 @@ int main() {
     auto device = LX_core::backend::VulkanDevice::create();
     device->initialize(window, "TestVulkanPipeline");
 
-    auto resourceManager = LX_core::backend::VulkanResourceManager::create(*device);
+    auto resourceManager =
+        LX_core::backend::VulkanResourceManager::create(*device);
     resourceManager->initializeRenderPassAndPipeline(device->getSurfaceFormat(),
                                                      device->getDepthFormat());
 
@@ -41,11 +42,11 @@ int main() {
     });
     auto indexBufferPtr = LX_core::IndexBuffer::create({0u, 1u, 2u});
     auto meshPtr = LX_core::Mesh::create(vertexBufferPtr, indexBufferPtr);
-    auto material = LX_infra::loadBlinnPhongDrawMaterial();
+    auto material = LX_infra::loadBlinnPhongMaterial();
     auto renderable = std::make_shared<LX_core::RenderableSubMesh>(
         meshPtr, material, LX_core::Skeleton::create({}));
     auto scene = LX_core::Scene::create(renderable);
-    auto item = scene->buildRenderingItem();
+    auto item = scene->buildRenderingItem(LX_core::Pass_Forward);
 
     auto &pipeline = resourceManager->getOrCreateRenderPipeline(item);
 

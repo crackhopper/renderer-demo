@@ -31,12 +31,17 @@
 
 ### Requirement: Skeleton exposes skinning presence for pipeline identity
 
-`Skeleton` SHALL provide `bool hasSkeleton() const` returning true for instances that participate in skinned rendering (per project convention for pipeline switches). It SHALL provide `size_t getPipelineHash() const` derived from that boolean (and any other pipeline-affecting state required by REQ-001).
+`Skeleton` SHALL provide `StringID getRenderSignature() const` returning a stable leaf id, specifically `GlobalStringTable::get().Intern("Skn1")`. The existence of a `Skeleton` instance implies skinning is active; callers that need a "no skinning" marker SHALL use the default `StringID{}` (id 0) sentinel. The previous `size_t getPipelineHash() const` method and the `kSkeletonPipelineHashTag` constant SHALL NOT exist.
 
-#### Scenario: Hash is stable for equivalent skinning flag
+#### Scenario: Signature is stable across instances
 
-- **WHEN** two `Skeleton` instances have the same pipeline-relevant skinning state
-- **THEN** `getPipelineHash()` SHALL return the same value for both
+- **WHEN** two `Skeleton` instances are created (irrespective of their internal bone data)
+- **THEN** `getRenderSignature()` SHALL return the same `StringID` id on both
+
+#### Scenario: getPipelineHash no longer compiles
+
+- **WHEN** a caller attempts to invoke `skeleton->getPipelineHash()`
+- **THEN** the call SHALL fail to compile (method removed)
 
 ### Requirement: IComponent and base header are removed
 

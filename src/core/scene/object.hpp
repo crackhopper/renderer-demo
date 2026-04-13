@@ -27,7 +27,8 @@ struct ObjectPC : public IRenderResource {
   }
 
   // 提供一个模板方法，让材质（Material）能够根据需要更新数据
-  template <typename T> void update(const T &params) {
+  template <typename T>
+  void update(const T &params) {
     static_assert(sizeof(T) <= 128, "PushConstant block too large!");
     memcpy(data, &params, sizeof(T));
     activeSize = sizeof(T);
@@ -56,6 +57,10 @@ public:
 
   virtual IShaderPtr getShaderInfo() const = 0;
   virtual ObjectPCPtr getObjectInfo() const { return nullptr; }
+
+  /// Structured object signature used to build PipelineKey via
+  /// `compose(TypeTag::ObjectRender, {meshSig, skelSig})`.
+  virtual StringID getRenderSignature(StringID pass) const = 0;
 };
 
 using IRenderablePtr = std::shared_ptr<IRenderable>;
@@ -96,6 +101,15 @@ public:
   virtual ObjectPCPtr getObjectInfo() const { return objectPC; }
   virtual ResourcePassFlag getPassMask() const {
     return material->getPassFlag();
+  }
+
+  StringID getRenderSignature(StringID pass) const override {
+    StringID meshSig = mesh ? mesh->getRenderSignature(pass) : StringID{};
+    StringID skelSig = skeleton.has_value()
+                           ? skeleton.value()->getRenderSignature()
+                           : StringID{};
+    StringID fields[] = {meshSig, skelSig};
+    return GlobalStringTable::get().compose(TypeTag::ObjectRender, fields);
   }
 };
 

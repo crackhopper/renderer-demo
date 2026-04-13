@@ -1,61 +1,83 @@
 #pragma once
 #include <atomic>
-#include <mutex>
+#include <cstdint>
+#include <optional>
 #include <shared_mutex>
+#include <span>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
 namespace LX_core {
 
+struct StringID;
+
+/// TypeTag 标注一条 StringID 是叶子字符串还是某类结构化 compose 结果。
+/// 叶子字符串（Intern / getOrCreateID）走 TypeTag::String；
+/// 结构化 ID（compose）按具体类别标注。
+enum class TypeTag : uint8_t {
+  String = 0,
+  ShaderProgram,
+  RenderState,
+  VertexLayoutItem,
+  VertexLayout,
+  MeshRender,
+  Skeleton,
+  RenderPassEntry,
+  MaterialRender,
+  ObjectRender,
+  PipelineKey,
+};
+
+/// GlobalStringTable 是全局字符串 intern 表。
+///
+/// 两类 API：
+///   1. 叶子字符串：getOrCreateID / Intern — 把普通字符串映射到 uint32 id
+///   2. 结构化 ID：compose / decompose / toDebugString — 把若干子 StringID 按
+///   TypeTag
+///      结构化 intern 成一个新的 StringID，支持反向解构和人类可读渲染
+///
+/// Intern(string_view) 与 StringID(const std::string&) 隐式构造语义等价，
+/// 专为结构化代码路径（嵌套 compose 参数包）提供无歧义的显式入口；
+/// 普通代码继续用 StringID 隐式构造。
 class GlobalStringTable {
 public:
-  static GlobalStringTable &get() {
-    static GlobalStringTable instance;
-    return instance;
-  }
+  static GlobalStringTable &get();
 
-  uint32_t getOrCreateID(const std::string &name) {
-    {
-      std::shared_lock<std::shared_mutex> lock(m_mutex);
-      auto it = m_stringToId.find(name);
-      if (it != m_stringToId.end())
-        return it->second;
-    }
+  uint32_t getOrCreateID(const std::string &name);
+  const std::string &getName(uint32_t id) const;
 
-    {
-      std::unique_lock<std::shared_mutex> lock(m_mutex);
-      auto it = m_stringToId.find(name);
-      if (it != m_stringToId.end())
-        return it->second;
+  StringID Intern(std::string_view sv);
 
-      uint32_t newID = m_nextID++;
-      m_stringToId[name] = newID;
+  StringID compose(TypeTag tag, std::span<const StringID> fields);
 
-      if (newID >= m_idToString.size())
-        m_idToString.resize(newID + 128);
-      m_idToString[newID] = name;
+  struct Decomposed {
+    TypeTag tag;
+    std::vector<StringID> fields;
+  };
+  std::optional<Decomposed> decompose(StringID id) const;
 
-      return newID;
-    }
-  }
-
-  const std::string &getName(uint32_t id) const {
-    std::shared_lock<std::shared_mutex> lock(m_mutex);
-    if (id < m_idToString.size() && !m_idToString[id].empty())
-      return m_idToString[id];
-    static const std::string unknown = "UNKNOWN_PROPERTY";
-    return unknown;
-  }
+  std::string toDebugString(StringID id) const;
 
 private:
-  GlobalStringTable() : m_nextID(1) { m_idToString.reserve(1024); }
+  GlobalStringTable();
   GlobalStringTable(const GlobalStringTable &) = delete;
   GlobalStringTable &operator=(const GlobalStringTable &) = delete;
 
+  struct ComposedEntry {
+    TypeTag tag;
+    std::vector<StringID> fields;
+  };
+
+  std::string toDebugStringImpl(uint32_t id, int depth) const;
+
+  uint32_t getOrCreateIDLocked(const std::string &name);
+
+  mutable std::shared_mutex m_mutex;
   std::unordered_map<std::string, uint32_t> m_stringToId;
   std::vector<std::string> m_idToString;
-  mutable std::shared_mutex m_mutex;
+  std::unordered_map<uint32_t, ComposedEntry> m_composedEntries;
   std::atomic<uint32_t> m_nextID;
 };
 
@@ -82,14 +104,13 @@ struct StringID {
   };
 };
 
-inline StringID MakeStringID(const std::string &name) {
-  return StringID(name);
-}
+inline StringID MakeStringID(const std::string &name) { return StringID(name); }
 
 } // namespace LX_core
 
 namespace std {
-template <> struct hash<LX_core::StringID> {
+template <>
+struct hash<LX_core::StringID> {
   size_t operator()(const LX_core::StringID &p) const {
     return static_cast<size_t>(p.id);
   }

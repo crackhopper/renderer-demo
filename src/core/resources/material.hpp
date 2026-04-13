@@ -20,6 +20,48 @@ enum class CullMode : uint8_t { None, Front, Back };
 enum class CompareOp : uint8_t { Less, LessEqual, Greater, Equal, Always };
 enum class BlendFactor : uint8_t { Zero, One, SrcAlpha, OneMinusSrcAlpha };
 
+inline const char *toString(CullMode m) {
+  switch (m) {
+  case CullMode::None:
+    return "CullNone";
+  case CullMode::Front:
+    return "CullFront";
+  case CullMode::Back:
+    return "CullBack";
+  }
+  return "CullUnknown";
+}
+
+inline const char *toString(CompareOp op) {
+  switch (op) {
+  case CompareOp::Less:
+    return "Less";
+  case CompareOp::LessEqual:
+    return "LessEqual";
+  case CompareOp::Greater:
+    return "Greater";
+  case CompareOp::Equal:
+    return "Equal";
+  case CompareOp::Always:
+    return "Always";
+  }
+  return "CmpUnknown";
+}
+
+inline const char *toString(BlendFactor f) {
+  switch (f) {
+  case BlendFactor::Zero:
+    return "Zero";
+  case BlendFactor::One:
+    return "One";
+  case BlendFactor::SrcAlpha:
+    return "SrcAlpha";
+  case BlendFactor::OneMinusSrcAlpha:
+    return "OneMinusSrcAlpha";
+  }
+  return "BlendUnknown";
+}
+
 /*****************************************************************
  * RenderState
  *****************************************************************/
@@ -51,7 +93,19 @@ struct RenderState {
     return h;
   }
 
-  size_t getPipelineHash() const { return getHash(); }
+  StringID getRenderSignature() const {
+    auto &tbl = GlobalStringTable::get();
+    StringID fields[] = {
+        tbl.Intern(toString(cullMode)),
+        tbl.Intern(depthTestEnable ? "DepthTest" : "NoDepthTest"),
+        tbl.Intern(depthWriteEnable ? "DepthWrite" : "NoDepthWrite"),
+        tbl.Intern(toString(depthOp)),
+        tbl.Intern(blendEnable ? "Blend" : "NoBlend"),
+        tbl.Intern(toString(srcBlend)),
+        tbl.Intern(toString(dstBlend)),
+    };
+    return tbl.compose(TypeTag::RenderState, fields);
+  }
 };
 
 /*****************************************************************
@@ -68,10 +122,12 @@ struct RenderPassEntry {
     return h;
   }
 
-  size_t getPipelineHash() const {
-    size_t h = renderState.getPipelineHash();
-    hash_combine(h, shaderSet.getPipelineHash());
-    return h;
+  StringID getRenderSignature() const {
+    StringID fields[] = {
+        shaderSet.getRenderSignature(),
+        renderState.getRenderSignature(),
+    };
+    return GlobalStringTable::get().compose(TypeTag::RenderPassEntry, fields);
   }
 
   std::optional<std::reference_wrapper<const ShaderResourceBinding>>
@@ -81,7 +137,7 @@ struct RenderPassEntry {
       return it->second;
     return std::nullopt;
   }
-  
+
   // 辅助方法：从该 Pass 的 Shader 反射信息中构建缓存
   void buildCache() {
     bindingCache.clear();
@@ -96,51 +152,72 @@ struct RenderPassEntry {
 };
 
 /*****************************************************************
- * MaterialTemplate（无裸指针）
+ * IMaterial — render-path contract consumed by Scene / backend
+ *****************************************************************/
+class IMaterial {
+public:
+  virtual ~IMaterial() = default;
+  virtual std::vector<IRenderResourcePtr> getDescriptorResources() const = 0;
+  virtual IShaderPtr getShaderInfo() const = 0;
+  virtual ResourcePassFlag getPassFlag() const = 0;
+  virtual ShaderProgramSet getShaderProgramSet() const = 0;
+  virtual RenderState getRenderState() const = 0;
+
+  /// Structured per-pass signature used to build PipelineKey via
+  /// `GlobalStringTable::compose(TypeTag::MaterialRender, ...)`.
+  virtual StringID getRenderSignature(StringID pass) const = 0;
+};
+
+using MaterialPtr = std::shared_ptr<IMaterial>;
+
+/*****************************************************************
+ * MaterialTemplate — shader + per-pass entries + name→binding cache
  *****************************************************************/
 class MaterialTemplate : public std::enable_shared_from_this<MaterialTemplate> {
+  struct Token {};
+
 public:
   using Ptr = std::shared_ptr<MaterialTemplate>;
 
-  MaterialTemplate(std::string name) : m_name(std::move(name)) {}
+  MaterialTemplate(Token, std::string name, IShaderPtr shader)
+      : m_name(std::move(name)), m_shader(std::move(shader)) {}
 
-  void setPass(const std::string &passName, const RenderPassEntry &entry) {
-    m_passes[passName] = entry;
-    m_passHashCache.erase(passName);
+  static Ptr create(std::string name, IShaderPtr shader) {
+    return std::make_shared<MaterialTemplate>(Token{}, std::move(name),
+                                              std::move(shader));
+  }
+
+  IShaderPtr getShader() const { return m_shader; }
+  const std::string &getName() const { return m_name; }
+
+  void setPass(StringID pass, RenderPassEntry entry) {
+    m_passes[pass] = std::move(entry);
   }
 
   std::optional<std::reference_wrapper<const RenderPassEntry>>
-  getEntry(const std::string &passName) const {
-    auto it = m_passes.find(passName);
+  getEntry(StringID pass) const {
+    auto it = m_passes.find(pass);
     if (it != m_passes.end())
       return it->second;
     return std::nullopt;
   }
 
-  size_t getPipelineHash(const std::string &passName) const {
-    auto it = m_passHashCache.find(passName);
-    if (it != m_passHashCache.end())
-      return it->second;
-
-    auto entryOpt = getEntry(passName);
-    if (!entryOpt)
-      return 0;
-
-    size_t h = entryOpt->get().getPipelineHash();
-    m_passHashCache[passName] = h;
-    return h;
+  StringID getRenderPassSignature(StringID pass) const {
+    auto it = m_passes.find(pass);
+    if (it == m_passes.end())
+      return StringID{};
+    return it->second.getRenderSignature();
   }
 
-  /// 构建 binding cache
+  /// Populate `m_bindingCache` from the template shader's reflection bindings.
+  /// Each entry is keyed by `StringID(binding.name)` so MaterialInstance
+  /// setters can resolve a member name directly.
   void buildBindingCache() {
     m_bindingCache.clear();
-
-    for (auto &[_, entry] : m_passes) {
-      auto shader = entry.shaderSet.getShader();
-      for (auto &b : shader->getReflectionBindings()) {
-        StringID id = MakeStringID(b.name);
-        m_bindingCache[id] = b;
-      }
+    if (!m_shader)
+      return;
+    for (const auto &b : m_shader->getReflectionBindings()) {
+      m_bindingCache[StringID(b.name)] = b;
     }
   }
 
@@ -154,118 +231,113 @@ public:
 
 private:
   std::string m_name;
-
-  std::unordered_map<std::string, RenderPassEntry> m_passes;
-
-  mutable std::unordered_map<std::string, size_t> m_passHashCache;
+  IShaderPtr m_shader;
+  std::unordered_map<StringID, RenderPassEntry, StringID::Hash> m_passes;
   std::unordered_map<StringID, ShaderResourceBinding> m_bindingCache;
 };
 
 /*****************************************************************
- * MaterialInstance（无裸指针）
+ * UboByteBufferResource — IRenderResource over a non-owning byte vector
+ *
+ * Used by `MaterialInstance` to expose its std140 CPU buffer to the
+ * descriptor-sync pipeline without copying. Lifetime contract: the source
+ * vector MUST outlive every copy of the resulting shared_ptr. Because
+ * `MaterialInstance` disables copy/move, its `m_uboBuffer` address is
+ * stable for the instance's full lifetime.
  *****************************************************************/
-class MaterialInstance {
+class UboByteBufferResource : public IRenderResource {
 public:
-  using Ptr = std::shared_ptr<MaterialInstance>;
-
-  MaterialInstance(MaterialTemplate::Ptr tmpl) : m_template(std::move(tmpl)) {}
-
-  void setVec4(StringID id, const Vec4f &value) {
-    auto binding = m_template->findBinding(id);
-    assert(binding && binding->get().type == ShaderPropertyType::Vec4);
-    m_vec4s[id] = value;
-  }
-
-  void setFloat(StringID id, float value) {
-    auto binding = m_template->findBinding(id);
-    assert(binding && binding->get().type == ShaderPropertyType::Float);
-    m_floats[id] = value;
-  }
-
-  void setTexture(StringID id, TexturePtr tex) {
-    auto binding = m_template->findBinding(id);
-    assert(binding && binding->get().type == ShaderPropertyType::Texture2D);
-    m_textures[id] = tex;
-  }
-
-  MaterialTemplate::Ptr getTemplate() const { return m_template; }
-
-private:
-  MaterialTemplate::Ptr m_template;
-
-  std::unordered_map<StringID, Vec4f> m_vec4s;
-  std::unordered_map<StringID, float> m_floats;
-  std::unordered_map<StringID, TexturePtr> m_textures;
-};
-
-/// Std140 layout matching `MaterialUBO` in `shaders/glsl/blinnphong_0.frag`.
-struct alignas(16) BlinnPhongMaterialUBO : public IRenderResource {
-  struct Params {
-    Vec3f baseColor{0.8f, 0.8f, 0.8f};
-    float shininess = 12.0f;
-    float specularIntensity = 1.0f;
-    int32_t enableAlbedo = 0;
-    int32_t enableNormalMap = 0;
-    int32_t padding = 0;
-  } params{};
-
-  explicit BlinnPhongMaterialUBO(ResourcePassFlag passFlag) : m_passFlag(passFlag) {}
+  UboByteBufferResource(std::vector<uint8_t> &buffer, uint32_t byteSize,
+                        ResourcePassFlag passFlag)
+      : m_buffer(&buffer), m_byteSize(byteSize), m_passFlag(passFlag) {}
 
   ResourcePassFlag getPassFlag() const override { return m_passFlag; }
   ResourceType getType() const override { return ResourceType::UniformBuffer; }
-  const void *getRawData() const override { return &params; }
-  static constexpr usize ResourceSize = sizeof(Params);
-  u32 getByteSize() const override { return static_cast<u32>(ResourceSize); }
+  const void *getRawData() const override { return m_buffer->data(); }
+  u32 getByteSize() const override { return m_byteSize; }
+  // TODO(REQ-003b): drop once reflection-driven binding replaces the
+  // `forward_pipeline_slots.hpp` lookup table.
   PipelineSlotId getPipelineSlotId() const override {
     return PipelineSlotId::MaterialUBO;
   }
 
 private:
-  ResourcePassFlag m_passFlag = ResourcePassFlag::Forward;
+  std::vector<uint8_t> *m_buffer;
+  uint32_t m_byteSize;
+  ResourcePassFlag m_passFlag;
 };
 
-using BlinnPhongMaterialUboPtr = std::shared_ptr<BlinnPhongMaterialUBO>;
+/*****************************************************************
+ * MaterialInstance — concrete IMaterial backed by shader reflection
+ *****************************************************************/
+class MaterialInstance : public IMaterial {
+  struct Token {};
 
-/// Render-path material: descriptor sources, shader, and pass (no concrete shading model).
-class IMaterial {
 public:
-  virtual ~IMaterial() = default;
-  virtual std::vector<IRenderResourcePtr> getDescriptorResources() const = 0;
-  virtual IShaderPtr getShaderInfo() const = 0;
-  virtual ResourcePassFlag getPassFlag() const = 0;
-  virtual ShaderProgramSet getShaderProgramSet() const = 0;
-  virtual RenderState getRenderState() const = 0;
-};
+  using Ptr = std::shared_ptr<MaterialInstance>;
 
-using MaterialPtr = std::shared_ptr<IMaterial>;
+  MaterialInstance(Token, MaterialTemplate::Ptr tmpl,
+                   ResourcePassFlag passFlag);
 
-/// CPU-side material for file-based shaders (e.g. blinnphong_0) with reflection-backed
-/// `IShader` and explicit `ShaderProgramSet` for pipeline keys.
-class DrawMaterial : public IMaterial {
-public:
-  using Ptr = std::shared_ptr<DrawMaterial>;
+  static Ptr create(MaterialTemplate::Ptr tmpl,
+                    ResourcePassFlag passFlag = ResourcePassFlag::Forward) {
+    return std::make_shared<MaterialInstance>(Token{}, std::move(tmpl),
+                                              passFlag);
+  }
 
-  static Ptr create(IShaderPtr shader, ShaderProgramSet programSet,
-                    ResourcePassFlag passFlag = ResourcePassFlag::Forward);
+  // Non-copyable, non-movable: `m_uboResource` holds a raw pointer into
+  // `m_uboBuffer`. Moving the instance would dangle that pointer.
+  MaterialInstance(const MaterialInstance &) = delete;
+  MaterialInstance &operator=(const MaterialInstance &) = delete;
+  MaterialInstance(MaterialInstance &&) = delete;
+  MaterialInstance &operator=(MaterialInstance &&) = delete;
 
+  // ==== IMaterial ====
   std::vector<IRenderResourcePtr> getDescriptorResources() const override;
   IShaderPtr getShaderInfo() const override;
-  ResourcePassFlag getPassFlag() const override;
+  ResourcePassFlag getPassFlag() const override { return m_passFlag; }
   ShaderProgramSet getShaderProgramSet() const override;
   RenderState getRenderState() const override;
+  StringID getRenderSignature(StringID pass) const override;
 
-  BlinnPhongMaterialUboPtr ubo;
-  CombinedTextureSamplerPtr albedoSampler;
-  CombinedTextureSamplerPtr normalSampler;
+  // ==== Per-instance UBO setters (StringID-keyed) ====
+  void setVec4(StringID id, const Vec4f &value);
+  void setVec3(StringID id, const Vec3f &value);
+  void setFloat(StringID id, float value);
+  void setInt(StringID id, int32_t value);
+
+  // ==== Per-instance texture bindings ====
+  // Takes a `CombinedTextureSamplerPtr` because that's the concrete
+  // `IRenderResource` the backend descriptor path expects for `sampler2D`.
+  void setTexture(StringID id, CombinedTextureSamplerPtr tex);
+
+  // ==== GPU sync ====
+  void updateUBO();
+
+  // ==== Accessors ====
+  MaterialTemplate::Ptr getTemplate() const { return m_template; }
+  const std::vector<uint8_t> &getUboBuffer() const { return m_uboBuffer; }
+  const ShaderResourceBinding *getUboBinding() const { return m_uboBinding; }
 
 private:
-  DrawMaterial(IShaderPtr shader, ShaderProgramSet programSet, RenderState renderState,
-               ResourcePassFlag passFlag, BlinnPhongMaterialUboPtr ubo);
+  /// Locate a UBO member by StringID, assert type, memcpy value, mark dirty.
+  void writeUboMember(StringID id, const void *src, size_t nbytes,
+                      ShaderPropertyType expected);
 
-  IShaderPtr m_shader;
-  ShaderProgramSet m_programSet;
-  RenderState m_renderState;
+  MaterialTemplate::Ptr m_template;
   ResourcePassFlag m_passFlag;
+
+  // CPU-side std140 byte buffer, sized from shader reflection.
+  std::vector<uint8_t> m_uboBuffer;
+  // Non-owning pointer into m_template->getShader()->getReflectionBindings().
+  const ShaderResourceBinding *m_uboBinding = nullptr;
+  // Cached IRenderResource wrapper over m_uboBuffer. Built in the constructor
+  // and handed out by getDescriptorResources(). Stable identity across calls.
+  IRenderResourcePtr m_uboResource;
+  bool m_uboDirty = false;
+
+  // Per-instance sampler textures, keyed by binding name StringID.
+  std::unordered_map<StringID, CombinedTextureSamplerPtr> m_textures;
 };
 
 } // namespace LX_core

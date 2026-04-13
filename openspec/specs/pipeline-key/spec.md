@@ -1,32 +1,41 @@
 ## Purpose
 
-Define `PipelineKey` as the core-layer identity for Vulkan (or other) graphics pipelines, built from shader program set, mesh/layout topology factors, render state, and optional skinning, and carried on `RenderingItem` for cache lookup.
+Define `PipelineKey` as the core-layer identity for Vulkan (or other) graphics pipelines, built from structured render signatures composed through `GlobalStringTable`, and carried on `RenderingItem` for cache lookup.
 
 ## Requirements
 
 ### Requirement: PipelineKey wraps a stable StringID for pipeline identity
 
-The system SHALL provide `LX_core::PipelineKey` in core holding a `StringID` that uniquely identifies a graphics pipeline configuration. `PipelineKey` SHALL provide `operator==`, `operator!=`, and a nested `Hash` type suitable for `std::unordered_map`.
+The system SHALL provide `LX_core::PipelineKey` in core holding a `StringID` that uniquely identifies a graphics pipeline configuration. `PipelineKey` SHALL provide `operator==`, `operator!=`, and a nested `Hash` type suitable for `std::unordered_map`. The underlying `StringID` SHALL be a structured id produced by `GlobalStringTable::compose(TypeTag::PipelineKey, ...)`, so that `GlobalStringTable::toDebugString(id)` fully renders the participating object and material signatures.
 
 #### Scenario: Equal keys compare by StringID
 
-- **WHEN** two `PipelineKey` values were built from the same canonical interned string
+- **WHEN** two `PipelineKey` values were built from the same canonical compose result
 - **THEN** their `StringID` members SHALL be equal and `operator==` SHALL return true
 
-### Requirement: PipelineKey build composes factors per canonical format
+#### Scenario: toDebugString renders the full pipeline tree
+- **WHEN** `GlobalStringTable::get().toDebugString(key.id)` is called on a `PipelineKey` built from a structured object and material signature
+- **THEN** the returned string starts with `"PipelineKey("` and recursively contains the children's tag names (`ObjectRender(...)`, `MaterialRender(...)`, etc.)
 
-`PipelineKey::build` SHALL accept `ShaderProgramSet`, `VertexLayout`, `RenderState`, `PrimitiveTopology`, and `bool hasSkeleton`, and SHALL produce a `PipelineKey` by concatenating factors into a single canonical string and interning it via `StringID`. The implementation SHALL obtain numeric/hash segments using `getPipelineHash()` on each participating resource type as specified in the resource-pipeline-hash capability, not ad hoc hash methods at the key boundary. Factors SHALL appear in the order: shader name and variant segment, vertex layout and topology segment, render state segment, optional skeleton suffix as required by the project REQ-002 document.
+### Requirement: PipelineKey build composes object and material signatures
 
-#### Scenario: Different shader variants yield different keys
+`PipelineKey::build` SHALL accept exactly two arguments, `StringID objectSig` and `StringID materialSig`, and SHALL produce a `PipelineKey` whose `id` equals `GlobalStringTable::get().compose(TypeTag::PipelineKey, {objectSig, materialSig})`. Callers assembling pipeline identity SHALL first resolve `objectSig` via `IRenderable::getRenderSignature(pass)` and `materialSig` via `IMaterial::getRenderSignature(pass)`.
 
-- **WHEN** two builds differ only by shader variant macros
+#### Scenario: Different material signatures yield different keys
+
+- **WHEN** two builds share `objectSig` but differ in `materialSig`
 - **THEN** the resulting `PipelineKey::id` values SHALL differ
 
-### Requirement: RenderingItem carries PipelineKey
+#### Scenario: Same signatures yield same key
 
-`RenderingItem` SHALL contain a `PipelineKey pipelineKey` member supplied when the item is built for rendering.
+- **WHEN** two builds pass the same `objectSig` and `materialSig`
+- **THEN** the resulting `PipelineKey::id` values SHALL be equal
 
-#### Scenario: Scene fills pipeline key
+### Requirement: RenderingItem carries PipelineKey and Pass
 
-- **WHEN** `Scene::buildRenderingItem()` constructs a `RenderingItem` from a renderable with consistent shader, mesh layout, render state, topology, and skeleton presence
-- **THEN** `item.pipelineKey` SHALL be set to `PipelineKey::build(...)` for those inputs
+`RenderingItem` SHALL contain a `PipelineKey pipelineKey` member AND a `StringID pass` member, both supplied when the item is built for rendering.
+
+#### Scenario: Scene fills pipeline key and pass
+
+- **WHEN** `Scene::buildRenderingItem(Pass_Forward)` constructs a `RenderingItem` from a renderable with valid mesh and material
+- **THEN** `item.pipelineKey` SHALL be set to `PipelineKey::build(objectSig, materialSig)` for `Pass_Forward` and `item.pass` SHALL equal `Pass_Forward`

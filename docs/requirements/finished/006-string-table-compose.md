@@ -180,4 +180,10 @@ std::string GlobalStringTable::toDebugString(StringID id) const {
 
 ## 实施状态
 
-未开始。
+已完成（2026-04-13）— 通过 openspec 变更 `extend-string-table-compose` 落地。
+
+- `src/core/utils/string_table.{hpp,cpp}` 实现 `TypeTag` / `Intern` / `compose` / `decompose` / `toDebugString`
+- `src/test/integration/test_string_table.cpp` 覆盖 11 条用例（叶子去重、结构化去重、顺序敏感、跨 tag 去重、往返、叶子/非法 decompose、空 fields、toDebugString 渲染/叶子、8 线程并发 compose）
+- REQ-007（`interning-pipeline-identity`）落地时已作为 `compose`/`Intern`/`TypeTag` 的首个生产消费者验证：`test_pipeline_identity.cpp` 的 `toDebugString` 输出
+  `PipelineKey(ObjectRender(MeshRender(VertexLayout(...), tri), ...), MaterialRender(RenderPassEntry(ShaderProgram(blinnphong_0, HAS_NORMAL_MAP), RenderState(...))))`
+  完整验证了嵌套 compose + decompose 的往返与渲染链路

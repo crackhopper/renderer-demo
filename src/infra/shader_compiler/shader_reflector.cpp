@@ -1,8 +1,78 @@
 #include "shader_reflector.hpp"
+#include <cassert>
+#include <iostream>
 #include <spirv_cross.hpp>
 #include <unordered_map>
 
 namespace LX_infra {
+
+static LX_core::ShaderPropertyType
+mapMemberType(const spirv_cross::SPIRType &type) {
+  // Only handles flat numeric members: scalars, vectors, mat4.
+  // Non-numeric / nested shapes fall through to Float as a conservative default;
+  // callers should guard against nested structs before reaching this.
+  using BT = spirv_cross::SPIRType::BaseType;
+  if (type.basetype == BT::Int || type.basetype == BT::UInt) {
+    return LX_core::ShaderPropertyType::Int;
+  }
+  if (type.basetype == BT::Float) {
+    if (type.columns == 4 && type.vecsize == 4) {
+      return LX_core::ShaderPropertyType::Mat4;
+    }
+    if (type.columns == 1) {
+      switch (type.vecsize) {
+      case 1:
+        return LX_core::ShaderPropertyType::Float;
+      case 2:
+        return LX_core::ShaderPropertyType::Vec2;
+      case 3:
+        return LX_core::ShaderPropertyType::Vec3;
+      case 4:
+        return LX_core::ShaderPropertyType::Vec4;
+      default:
+        break;
+      }
+    }
+  }
+  return LX_core::ShaderPropertyType::Float;
+}
+
+/// Walks the top-level members of a UBO struct and fills `out` with
+/// std140 layout info. On unsupported shapes (nested struct, array-of-struct,
+/// or any member with non-empty `array`), clears `out`, logs a warning, and
+/// returns early.
+static void extractStructMembers(const spirv_cross::Compiler &compiler,
+                                 const spirv_cross::SPIRType &type,
+                                 std::vector<LX_core::StructMemberInfo> &out) {
+  using BT = spirv_cross::SPIRType::BaseType;
+  const uint32_t count = static_cast<uint32_t>(type.member_types.size());
+  out.clear();
+  out.reserve(count);
+  for (uint32_t i = 0; i < count; ++i) {
+    const auto &memberType = compiler.get_type(type.member_types[i]);
+
+    // Reject unsupported shapes: nested struct or any array member.
+    if (memberType.basetype == BT::Struct || !memberType.array.empty()) {
+      std::cerr << "[ShaderReflector] Unsupported UBO member shape at index "
+                << i << " (nested struct or array); falling back to empty "
+                << "members for this binding.\n";
+      out.clear();
+      return;
+    }
+
+    LX_core::StructMemberInfo info;
+    info.name = compiler.get_member_name(type.self, i);
+    if (info.name.empty()) {
+      info.name = "_member" + std::to_string(i);
+    }
+    info.type = mapMemberType(memberType);
+    info.offset = compiler.get_member_decoration(type.self, i,
+                                                 spv::DecorationOffset);
+    info.size = static_cast<uint32_t>(
+        compiler.get_declared_struct_member_size(type, i));
+    out.push_back(std::move(info));
+  }
+}
 
 static LX_core::ShaderPropertyType
 mapSpvType(const spirv_cross::Compiler &compiler,
@@ -99,6 +169,14 @@ ShaderReflector::reflectSingleStage(const LX_core::ShaderStageCode &stage) {
           // Buffer size
           b.size = computeBufferSize(compiler, res);
 
+          // UBO member layout (flat blocks only; others remain empty)
+          if (b.type == LX_core::ShaderPropertyType::UniformBuffer) {
+            const auto &blockType = compiler.get_type(res.base_type_id);
+            if (blockType.basetype == spirv_cross::SPIRType::Struct) {
+              extractStructMembers(compiler, blockType, b.members);
+            }
+          }
+
           bindings.push_back(std::move(b));
         }
       };
@@ -127,6 +205,23 @@ ShaderReflector::reflect(const std::vector<LX_core::ShaderStageCode> &stages) {
       if (it != merged.end()) {
         // Merge stageFlags
         it->second.stageFlags = it->second.stageFlags | b.stageFlags;
+        // Preserve the first non-empty members vector; verify subsequent
+        // stages agree structurally (same UBO must have identical layout).
+        if (it->second.members.empty() && !b.members.empty()) {
+          it->second.members = std::move(b.members);
+        } else if (!it->second.members.empty() && !b.members.empty()) {
+          assert(it->second.members.size() == b.members.size() &&
+                 "ShaderReflector: UBO member count mismatch across stages");
+          for (size_t i = 0; i < it->second.members.size(); ++i) {
+            const auto &a = it->second.members[i];
+            const auto &c = b.members[i];
+            (void)a;
+            (void)c;
+            assert(a.name == c.name && a.type == c.type &&
+                   a.offset == c.offset && a.size == c.size &&
+                   "ShaderReflector: UBO member layout mismatch across stages");
+          }
+        }
       } else {
         merged.emplace(key, std::move(b));
       }

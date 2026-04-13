@@ -3,7 +3,7 @@
 
 namespace LX_core {
 
-RenderingItem Scene::buildRenderingItem() {
+RenderingItem Scene::buildRenderingItem(StringID pass) {
   RenderingItem item;
   item.vertexBuffer = mesh->getVertexBuffer();
   item.indexBuffer = mesh->getIndexBuffer();
@@ -11,13 +11,13 @@ RenderingItem Scene::buildRenderingItem() {
   item.descriptorResources = mesh->getDescriptorResources();
   item.shaderInfo = mesh->getShaderInfo();
   item.passMask = mesh->getPassMask();
+  item.pass = pass;
 
   auto sub = std::dynamic_pointer_cast<RenderableSubMesh>(mesh);
   if (sub && sub->mesh && sub->material) {
-    item.pipelineKey = PipelineKey::build(
-        sub->material->getShaderProgramSet(), *sub->mesh,
-        sub->material->getRenderState(),
-        sub->skeleton.value_or(SkeletonPtr{}));
+    StringID objectSig = sub->getRenderSignature(pass);
+    StringID materialSig = sub->material->getRenderSignature(pass);
+    item.pipelineKey = PipelineKey::build(objectSig, materialSig);
   }
   return item;
 }

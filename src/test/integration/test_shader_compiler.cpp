@@ -26,6 +26,8 @@ static const char *shaderPropertyTypeName(ShaderPropertyType t) {
     return "Vec4";
   case ShaderPropertyType::Mat4:
     return "Mat4";
+  case ShaderPropertyType::Int:
+    return "Int";
   case ShaderPropertyType::UniformBuffer:
     return "UniformBuffer";
   case ShaderPropertyType::StorageBuffer:
@@ -179,6 +181,119 @@ static bool testVariantCombination(
   return true;
 }
 
+// ---------------------------------------------------------------------------
+// UBO member reflection tests (REQ-004)
+// ---------------------------------------------------------------------------
+
+static const StructMemberInfo *
+findMember(const ShaderResourceBinding &b, const std::string &name) {
+  for (const auto &m : b.members) {
+    if (m.name == name)
+      return &m;
+  }
+  return nullptr;
+}
+
+static bool testBlinnPhongMaterialUboMembers(const std::filesystem::path &vertPath,
+                                             const std::filesystem::path &fragPath) {
+  std::cout << "\n========================================\n";
+  std::cout << "  Test: BlinnPhong MaterialUBO members\n";
+  std::cout << "========================================\n";
+
+  auto compileResult = ShaderCompiler::compileProgram(vertPath, fragPath, {});
+  if (!compileResult.success) {
+    std::cerr << "  COMPILE FAILED: " << compileResult.errorMessage << "\n";
+    return false;
+  }
+  auto bindings = ShaderReflector::reflect(compileResult.stages);
+
+  const ShaderResourceBinding *materialBinding = nullptr;
+  for (const auto &b : bindings) {
+    if (b.name == "MaterialUBO" ||
+        (b.set == 2 && b.binding == 0 &&
+         b.type == ShaderPropertyType::UniformBuffer)) {
+      materialBinding = &b;
+      break;
+    }
+  }
+  if (!materialBinding) {
+    std::cerr << "  FAIL: MaterialUBO binding not found\n";
+    return false;
+  }
+
+  // 4.2 basic shape
+  if (materialBinding->type != ShaderPropertyType::UniformBuffer) {
+    std::cerr << "  FAIL: MaterialUBO is not UniformBuffer type\n";
+    return false;
+  }
+  if (materialBinding->members.size() < 5) {
+    std::cerr << "  FAIL: expected >= 5 members, got "
+              << materialBinding->members.size() << "\n";
+    return false;
+  }
+  std::cout << "  MaterialUBO has " << materialBinding->members.size()
+            << " members\n";
+  for (const auto &m : materialBinding->members) {
+    std::cout << "    - " << m.name
+              << "  type=" << shaderPropertyTypeName(m.type)
+              << "  offset=" << m.offset << "  size=" << m.size << "\n";
+  }
+
+  // 4.3 baseColor: Vec3 at offset 0
+  const auto *baseColor = findMember(*materialBinding, "baseColor");
+  if (!baseColor) {
+    std::cerr << "  FAIL: baseColor member missing\n";
+    return false;
+  }
+  if (baseColor->type != ShaderPropertyType::Vec3 || baseColor->offset != 0) {
+    std::cerr << "  FAIL: baseColor expected Vec3@0, got "
+              << shaderPropertyTypeName(baseColor->type) << "@"
+              << baseColor->offset << "\n";
+    return false;
+  }
+
+  // 4.4 shininess: Float, std140 packs it right after vec3 at offset 12
+  const auto *shininess = findMember(*materialBinding, "shininess");
+  if (!shininess) {
+    std::cerr << "  FAIL: shininess member missing\n";
+    return false;
+  }
+  if (shininess->type != ShaderPropertyType::Float) {
+    std::cerr << "  FAIL: shininess expected Float, got "
+              << shaderPropertyTypeName(shininess->type) << "\n";
+    return false;
+  }
+  if (shininess->offset != 12 && shininess->offset != 16) {
+    std::cerr << "  FAIL: shininess expected offset 12 or 16, got "
+              << shininess->offset << "\n";
+    return false;
+  }
+
+  // 4.5 enableAlbedo: Int
+  const auto *enableAlbedo = findMember(*materialBinding, "enableAlbedo");
+  if (!enableAlbedo) {
+    std::cerr << "  FAIL: enableAlbedo member missing\n";
+    return false;
+  }
+  if (enableAlbedo->type != ShaderPropertyType::Int) {
+    std::cerr << "  FAIL: enableAlbedo expected Int, got "
+              << shaderPropertyTypeName(enableAlbedo->type) << "\n";
+    return false;
+  }
+
+  // 4.6 non-UBO bindings have empty members (check sampler2D bindings)
+  for (const auto &b : bindings) {
+    if (b.type == ShaderPropertyType::Texture2D && !b.members.empty()) {
+      std::cerr << "  FAIL: Texture2D binding '" << b.name
+                << "' unexpectedly has " << b.members.size() << " members\n";
+      return false;
+    }
+  }
+
+  std::cout << "  PASS: MaterialUBO members reflected correctly\n";
+  return true;
+}
+
 int main(int argc, char *argv[]) {
   // Determine shader directory
   std::filesystem::path shaderDir;
@@ -223,6 +338,17 @@ int main(int argc, char *argv[]) {
                               {{"HAS_NORMAL_MAP", true},
                                {"HAS_METALLIC_ROUGHNESS", true}}))
     ++failures;
+
+  // Test 4: BlinnPhong MaterialUBO member reflection (REQ-004)
+  auto blinnVert = shaderDir / "blinnphong_0.vert";
+  auto blinnFrag = shaderDir / "blinnphong_0.frag";
+  if (std::filesystem::exists(blinnVert) && std::filesystem::exists(blinnFrag)) {
+    if (!testBlinnPhongMaterialUboMembers(blinnVert, blinnFrag))
+      ++failures;
+  } else {
+    std::cerr << "  SKIP: blinnphong_0 shaders not found at " << shaderDir
+              << "\n";
+  }
 
   std::cout << "\n========================================\n";
   if (failures == 0) {

@@ -1,5 +1,6 @@
 #pragma once
 #include "core/gpu/render_resource.hpp"
+#include "core/utils/string_table.hpp"
 #include <algorithm>
 #include <functional>
 #include <memory>
@@ -19,6 +20,27 @@ enum class PrimitiveTopology : uint32_t {
   TriangleStrip = 4,
   TriangleFan = 5
 };
+
+/// Leaf StringID for a topology. Free function because enum class can't
+/// carry methods; used by `Mesh::getRenderSignature`.
+inline StringID topologySignature(PrimitiveTopology t) {
+  auto &tbl = GlobalStringTable::get();
+  switch (t) {
+  case PrimitiveTopology::PointList:
+    return tbl.Intern("point");
+  case PrimitiveTopology::LineList:
+    return tbl.Intern("line");
+  case PrimitiveTopology::LineStrip:
+    return tbl.Intern("lineStrip");
+  case PrimitiveTopology::TriangleList:
+    return tbl.Intern("tri");
+  case PrimitiveTopology::TriangleStrip:
+    return tbl.Intern("triStrip");
+  case PrimitiveTopology::TriangleFan:
+    return tbl.Intern("triFan");
+  }
+  return tbl.Intern("topoUnknown");
+}
 
 /**
  * @brief 索引数据位宽

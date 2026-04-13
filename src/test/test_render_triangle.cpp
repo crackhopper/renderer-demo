@@ -10,7 +10,7 @@
 
 // 窗口系统
 #include "infra/window/window.hpp"
-#include "infra/loaders/blinnphong_draw_material_loader.hpp"
+#include "infra/loaders/blinnphong_material_loader.hpp"
 
 #include <array>
 #include <cstdlib>
@@ -64,10 +64,10 @@ int main() {
   auto indexBufferPtr = IndexBuffer::create({0, 1, 2});
   auto meshPtr = Mesh::create(vertexBufferPtr, indexBufferPtr);
 
-  auto material = LX_infra::loadBlinnPhongDrawMaterial();
-  material->ubo->params.enableNormalMap =
-      0; // avoid needing correct tangents for N mapping
-  material->ubo->setDirty();
+  auto material = LX_infra::loadBlinnPhongMaterial();
+  // Avoid needing correct tangents for normal mapping.
+  material->setInt(LX_core::StringID("enableNormal"), 0);
+  material->updateUBO();
 
   auto skeletonPtr = Skeleton::create({});
 

@@ -4,6 +4,7 @@
 #include "core/scene/camera.hpp"
 #include "core/scene/light.hpp"
 #include "core/scene/object.hpp"
+#include "core/scene/pass.hpp"
 
 namespace LX_core {
 
@@ -20,6 +21,7 @@ struct RenderingItem {
   std::vector<IRenderResourcePtr> descriptorResources; // 材质 + skeleton 等资源
 
   ResourcePassFlag passMask;
+  StringID pass;
   PipelineKey pipelineKey;
 };
 
@@ -35,14 +37,15 @@ public:
 
   Scene(IRenderablePtr mesh) : mesh(mesh) {
     camera = std::make_shared<Camera>(ResourcePassFlag::Forward);
-    directionalLight = std::make_shared<DirectionalLight>(ResourcePassFlag::Forward);
+    directionalLight =
+        std::make_shared<DirectionalLight>(ResourcePassFlag::Forward);
   }
 
   static auto create(IRenderablePtr mesh) {
     return std::make_shared<Scene>(mesh);
   }
 
-  RenderingItem buildRenderingItem();
+  RenderingItem buildRenderingItem(StringID pass);
 };
 
 using ScenePtr = Scene::Ptr;

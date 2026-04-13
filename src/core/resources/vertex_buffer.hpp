@@ -1,10 +1,11 @@
 #pragma once
 #include "core/gpu/render_resource.hpp"
 #include "core/math/vec.hpp"
+#include "core/utils/string_table.hpp"
 #include <any>
-#include <cstring>
 #include <array>
 #include <cassert>
+#include <cstring>
 #include <functional>
 #include <string>
 #include <tuple>
@@ -19,6 +20,32 @@ namespace LX_core {
  *****************************************************************/
 enum class DataType { Float1, Float2, Float3, Float4, Int4 };
 enum class VertexInputRate { Vertex = 0, Instance = 1 };
+
+inline const char *toString(DataType t) {
+  switch (t) {
+  case DataType::Float1:
+    return "Float1";
+  case DataType::Float2:
+    return "Float2";
+  case DataType::Float3:
+    return "Float3";
+  case DataType::Float4:
+    return "Float4";
+  case DataType::Int4:
+    return "Int4";
+  }
+  return "DataUnknown";
+}
+
+inline const char *toString(VertexInputRate r) {
+  switch (r) {
+  case VertexInputRate::Vertex:
+    return "Vertex";
+  case VertexInputRate::Instance:
+    return "Instance";
+  }
+  return "RateUnknown";
+}
 
 struct VertexLayoutItem {
   std::string name;
@@ -40,6 +67,22 @@ struct VertexLayoutItem {
     return h;
   }
 
+  /// "{location}_{name}_{type}_{inputRate}_{offset}" 格式的叶子 StringID
+  StringID getRenderSignature() const {
+    std::string tag;
+    tag.reserve(name.size() + 32);
+    tag += std::to_string(location);
+    tag += '_';
+    tag += name;
+    tag += '_';
+    tag += toString(type);
+    tag += '_';
+    tag += toString(inputRate);
+    tag += '_';
+    tag += std::to_string(offset);
+    return GlobalStringTable::get().Intern(tag);
+  }
+
   bool operator==(const VertexLayoutItem &o) const {
     return name == o.name && location == o.location && type == o.type &&
            size == o.size && offset == o.offset && inputRate == o.inputRate;
@@ -58,6 +101,16 @@ public:
   const std::vector<VertexLayoutItem> &getItems() const { return m_items; }
   uint32_t getStride() const { return m_stride; }
   size_t getHash() const { return m_hash; }
+
+  StringID getRenderSignature() const {
+    auto &tbl = GlobalStringTable::get();
+    std::vector<StringID> parts;
+    parts.reserve(m_items.size() + 1);
+    for (const auto &item : m_items)
+      parts.push_back(item.getRenderSignature());
+    parts.push_back(tbl.Intern(std::to_string(m_stride)));
+    return tbl.compose(TypeTag::VertexLayout, parts);
+  }
 
   bool operator==(const VertexLayout &o) const {
     return m_hash == o.m_hash && m_items == o.m_items && m_stride == o.m_stride;
@@ -82,7 +135,8 @@ private:
 } // namespace LX_core
 
 namespace std {
-template <> struct hash<LX_core::VertexLayout> {
+template <>
+struct hash<LX_core::VertexLayout> {
   size_t operator()(const LX_core::VertexLayout &l) const {
     return l.getHash();
   }
@@ -107,12 +161,11 @@ public:
   virtual void *getRawDataMutable() = 0;
   u32 getByteSize() const override = 0;
 
-  ResourceType getType() const override {
-    return ResourceType::VertexBuffer;
-  }
+  ResourceType getType() const override { return ResourceType::VertexBuffer; }
 };
 
-template <typename VType> class VertexBuffer final : public IVertexBuffer {
+template <typename VType>
+class VertexBuffer final : public IVertexBuffer {
   static_assert(std::is_standard_layout_v<VType>,
                 "Vertex must be standard layout");
   static_assert(std::is_trivially_copyable_v<VType>,
@@ -155,7 +208,8 @@ class VertexFactory {
 public:
   using Creator = std::function<VertexBufferPtr(std::any &&rawData)>;
 
-  template <typename VType> static void registerType() {
+  template <typename VType>
+  static void registerType() {
     const auto &layout = VType::getLayout();
     size_t key = layout.getHash();
 
@@ -213,7 +267,8 @@ private:
 /*****************************************************************
  * Vertex定义
  *****************************************************************/
-template <typename T> struct VertexBase {
+template <typename T>
+struct VertexBase {
   bool operator==(const T &o) const {
     return std::memcmp(this, &o, sizeof(T)) == 0;
   }
@@ -371,8 +426,7 @@ struct VertexPosNormalUvBone : VertexBase<VertexPosNormalUvBone> {
   Vec4f boneWeights;
 
   VertexPosNormalUvBone() = default;
-  VertexPosNormalUvBone(Vec3f p, Vec3f n, Vec2f u, Vec4f t, Vec4i bid,
-                        Vec4f bw)
+  VertexPosNormalUvBone(Vec3f p, Vec3f n, Vec2f u, Vec4f t, Vec4i bid, Vec4f bw)
       : pos(p), normal(n), uv(u), tangent(t), boneIDs(bid), boneWeights(bw) {}
 
   static const VertexLayout &getLayout() {

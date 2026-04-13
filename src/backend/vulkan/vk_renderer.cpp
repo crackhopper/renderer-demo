@@ -1,5 +1,7 @@
 #include "vk_renderer.hpp"
 #include "core/gpu/render_resource.hpp"
+#include "core/scene/pass.hpp"
+#include "infra/window/window.hpp"
 #include "details/commands/vkc_cmdbuffer_manager.hpp"
 #include "details/descriptors/vkd_descriptor_manager.hpp"
 #include "details/render_objects/vkr_framebuffer.hpp"
@@ -7,7 +9,6 @@
 #include "details/render_objects/vkr_swapchain.hpp"
 #include "details/vk_device.hpp"
 #include "details/vk_resource_manager.hpp"
-#include "infra/window/window.hpp"
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
@@ -114,7 +115,7 @@ public:
 
   void initScene(ScenePtr _scene) override {
     scene = _scene;
-    renderItem = scene->buildRenderingItem();
+    renderItem = scene->buildRenderingItem(LX_core::Pass_Forward);
 
     // Inject camera/light UBOs required by the blinn-phong pipeline.
     if (scene->camera) {
@@ -148,8 +149,8 @@ public:
       std::cerr << "[RendererDebug] initScene: vertexBytes="
                 << renderItem.vertexBuffer->getByteSize()
                 << ", indexBytes=" << renderItem.indexBuffer->getByteSize()
-                << ", descriptorCount="
-                << renderItem.descriptorResources.size() << std::endl;
+                << ", descriptorCount=" << renderItem.descriptorResources.size()
+                << std::endl;
     }
   }
 

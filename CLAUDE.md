@@ -19,7 +19,7 @@ See `AGENTS.md` for full project context, architecture, and coding standards.
 - `openspec/specs/gui-system/spec.md` — ImGui integration
 - `openspec/specs/texture-loading/spec.md` — Image loading (stb_image)
 - `openspec/specs/mesh-loading/spec.md` — OBJ/GLTF mesh loading
-- `openspec/specs/resource-pipeline-hash/spec.md` — `getPipelineHash()` / pipeline identity
+- `openspec/specs/render-signature/spec.md` — `getRenderSignature(pass)` across resources; `Pass_*` constants
 - `openspec/specs/skeleton-resource/spec.md` — Skeleton as core resource, no `IComponent`
 
 ## Design Docs Index

@@ -3,6 +3,7 @@
 #include "core/math/mat.hpp"
 #include "core/math/quat.hpp"
 #include "core/math/vec.hpp"
+#include "core/utils/string_table.hpp"
 #include <cassert>
 #include <cstddef>
 #include <string>
@@ -84,9 +85,6 @@ using SkeletonUboPtr = std::shared_ptr<SkeletonUBO>;
 class Skeleton;
 using SkeletonPtr = std::shared_ptr<Skeleton>;
 
-/// Fixed tag mixed into pipeline identity when skinning is active (REQ-001).
-inline constexpr size_t kSkeletonPipelineHashTag = 0x536B6E31u; // 'Skn1'
-
 class Skeleton {
   class Token {};
 
@@ -95,8 +93,9 @@ public:
            ResourcePassFlag passFlag = ResourcePassFlag::Forward)
       : bones(bones), ubo(std::make_shared<SkeletonUBO>(bones, passFlag)) {}
 
-  static SkeletonPtr create(const std::vector<Bone> &bones,
-                            ResourcePassFlag passFlag = ResourcePassFlag::Forward) {
+  static SkeletonPtr
+  create(const std::vector<Bone> &bones,
+         ResourcePassFlag passFlag = ResourcePassFlag::Forward) {
     Token token;
     return std::make_shared<Skeleton>(token, bones, passFlag);
   }
@@ -114,7 +113,11 @@ public:
 
   SkeletonUboPtr getUBO() const { return ubo; }
 
-  size_t getPipelineHash() const { return kSkeletonPipelineHashTag; }
+  /// Skeleton 存在即代表启用骨骼，返回固定的 "Skn1" 叶子 StringID。
+  /// 无骨骼的情况由调用方用 `StringID{}` 表达，不走这里。
+  StringID getRenderSignature() const {
+    return GlobalStringTable::get().Intern("Skn1");
+  }
 
 private:
   std::vector<Bone> bones;

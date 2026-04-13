@@ -38,10 +38,14 @@ public:
     return hash;
   }
 
-  size_t getPipelineHash() const {
-    size_t h = getLayoutHash();
-    hash_combine(h, static_cast<uint32_t>(getPrimitiveTopology()));
-    return h;
+  /// Pass 参数保留以统一接口，当前实现忽略。
+  /// 未来可用于"同一 mesh 在不同 pass 剔除属性"。
+  StringID getRenderSignature(StringID /*pass*/) const {
+    StringID fields[] = {
+        vertexBuffer->getLayout().getRenderSignature(),
+        topologySignature(indexBuffer->getTopology()),
+    };
+    return GlobalStringTable::get().compose(TypeTag::MeshRender, fields);
   }
 
   const VertexLayout &getVertexLayout() const {

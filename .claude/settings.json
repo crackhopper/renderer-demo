@@ -1,5 +1,6 @@
 {
   "enabledPlugins": {
-    "ecc@ecc": true
+    "ecc@ecc": true,
+    "code-simplifier@claude-plugins-official": true
   }
 }

@@ -1,16 +1,16 @@
-#include "core/gpu/render_resource.hpp"
-#include "core/resources/index_buffer.hpp"
-#include "core/resources/vertex_buffer.hpp"
-#include "core/scene/scene.hpp"
-#include "core/utils/filesystem_tools.hpp"
 #include "backend/vulkan/details/commands/vkc_cmdbuffer_manager.hpp"
 #include "backend/vulkan/details/render_objects/vkr_framebuffer.hpp"
 #include "backend/vulkan/details/render_objects/vkr_renderpass.hpp"
 #include "backend/vulkan/details/resources/vkr_texture.hpp"
 #include "backend/vulkan/details/vk_device.hpp"
 #include "backend/vulkan/details/vk_resource_manager.hpp"
+#include "core/gpu/render_resource.hpp"
+#include "core/resources/index_buffer.hpp"
+#include "core/resources/vertex_buffer.hpp"
+#include "core/scene/scene.hpp"
 #include "core/utils/env.hpp"
-#include "infra/loaders/blinnphong_draw_material_loader.hpp"
+#include "core/utils/filesystem_tools.hpp"
+#include "infra/loaders/blinnphong_material_loader.hpp"
 #include "infra/window/window.hpp"
 
 #include <vulkan/vulkan.h>
@@ -41,9 +41,8 @@ int main() {
     VkSurfaceFormatKHR surfaceFormat = device->getSurfaceFormat();
 
     // Create command buffer manager first (needed for resource manager)
-    auto cmdBufferMgr =
-        LX_core::backend::VulkanCommandBufferManager::create(
-            *device, maxFrameInFlight, device->getGraphicsQueueFamilyIndex());
+    auto cmdBufferMgr = LX_core::backend::VulkanCommandBufferManager::create(
+        *device, maxFrameInFlight, device->getGraphicsQueueFamilyIndex());
     auto resourceManager =
         LX_core::backend::VulkanResourceManager::create(*device);
     resourceManager->initializeRenderPassAndPipeline(surfaceFormat,
@@ -58,10 +57,9 @@ int main() {
         VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, VK_IMAGE_ASPECT_COLOR_BIT);
     auto depthTex = LX_core::backend::VulkanTexture::createForAttachment(
         *device, extent.width, extent.height, depthFormat,
-        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
-        depthAspectMask);
-    std::vector<VkImageView> attachments = {
-        colorTex->getImageView(), depthTex->getImageView() };
+        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, depthAspectMask);
+    std::vector<VkImageView> attachments = {colorTex->getImageView(),
+                                            depthTex->getImageView()};
     auto framebuffer = LX_core::backend::VulkanFrameBuffer::create(
         *device, renderPass.getHandle(), attachments, extent);
 
@@ -80,9 +78,10 @@ int main() {
     auto indexBufferPtr = LX_core::IndexBuffer::create({0u, 1u, 2u});
     auto meshPtr = LX_core::Mesh::create(vertexBufferPtr, indexBufferPtr);
 
-    auto material = LX_infra::loadBlinnPhongDrawMaterial();
-    material->ubo->params.enableNormalMap = 0; // avoid normal texture
-    material->ubo->setDirty();
+    auto material = LX_infra::loadBlinnPhongMaterial();
+    material->setInt(LX_core::StringID("enableNormal"),
+                     0); // avoid normal texture
+    material->updateUBO();
 
     auto renderable =
         std::make_shared<LX_core::RenderableSubMesh>(meshPtr, material);
@@ -107,7 +106,7 @@ int main() {
     scene->camera->up = LX_core::Vec3f{0.0f, 1.0f, 0.0f};
     scene->camera->updateMatrices();
 
-    auto renderItem = scene->buildRenderingItem();
+    auto renderItem = scene->buildRenderingItem(LX_core::Pass_Forward);
 
     // Match VulkanRenderer::initScene(): inject camera/light UBO resources.
     if (scene->camera) {
