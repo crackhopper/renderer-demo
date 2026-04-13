@@ -1,5 +1,7 @@
 # REQ-002: PipelineKey 设计
 
+> **Superseded by REQ-007（R3/R4 部分）**：本文档 R3「规范化字符串格式」与 R4「`PipelineKey::build()` 工厂签名」由 REQ-007「结构化 Interning 驱动的 Pipeline Identity」替换——字符串格式从 `{shader}|{variants}|ml:..|rs:..|sk:..` 改为由 `GlobalStringTable::compose(TypeTag::PipelineKey, ...)` 生成的结构化 StringID；`build()` 改为两级 compose `(objectSig, materialSig)`。R1（`PipelineKey` 结构体定义）、R2（各资源贡献因素的抽象原则）、R5（`RenderingItem.pipelineKey` 字段）、R6（Backend 按 `PipelineKey` 缓存）仍然有效。归档保留历史上下文；当前实现以 REQ-007 为准。
+
 ## 背景
 
 当前 backend 通过硬编码字符串（`"blinnphong_0"`）查找已构建的 Vulkan Pipeline，无法根据 RenderingItem 的实际属性自动匹配。随着 Shader 变体、多种顶点格式、不同渲染状态的引入，需要一种自动化的 Pipeline 标识机制。
@@ -57,50 +59,52 @@ struct PipelineKey {
 
 以下因素共同决定 Pipeline 的唯一性：
 
-| 序号 | 因素 | 来源（getPipelineHash） | 格式示例 |
-|------|------|------------------------|----------|
-| 1 | Shader 名称 + 变体 | `ShaderProgramSet.getPipelineHash()` | `pbr\|HAS_NORMAL_MAP` |
-| 2 | 顶点布局 + 拓扑 | `Mesh.getPipelineHash()` | `vl:0x3a2f1b7c\|tri` |
+| 序号 | 因素 | 来源（getPipelineHash） | 段示例 |
+|------|------|------------------------|--------|
+| 1 | Shader 名称 + 变体 | `ShaderProgramSet`（`shaderName` 直出 + 变体段） | `pbr\|HAS_NORMAL_MAP` |
+| 2 | 顶点布局 + 拓扑 | `Mesh.getPipelineHash()`（layout 与 topology 已合并，见 REQ-001 R6） | `ml:0x3a2f1b7c` |
 | 3 | 渲染状态 | `RenderState.getPipelineHash()` | `rs:0x7c1de4a0` |
-| 4 | 骨骼动画标志 | `Skeleton.getPipelineHash()` | `+skel` 或空 |
+| 4 | 骨骼动画 | `Skeleton.getPipelineHash()`（无骨骼时贡献 0） | `sk:0x536b6e31` 或 `sk:0x0` |
 
-各资源统一通过 `getPipelineHash()` 方法提供其对 PipelineKey 的贡献（见 REQ-001 R6）。
+各资源统一通过 `getPipelineHash()` 方法提供其对 PipelineKey 的贡献（见 REQ-001 R6/R7）。
 
 ### R3: 规范化字符串格式
 
-各因素之间用 `|` 分隔，变体宏按字典序排序后用 `,` 分隔：
+各段之间用 `|` 分隔，变体宏按字典序排序后用 `,` 分隔：
 
 ```
-{shaderName}|{variant1,variant2,...}|vl:{hash}|rs:{hash}|{topology}[|+skel]
+{shaderName}|{variant1,variant2,...}|ml:{meshHash}|rs:{renderStateHash}|sk:{skeletonHash}
 ```
+
+- `ml` = mesh layout + topology 合并后的 hash（来自 `Mesh::getPipelineHash()`）
+- `sk` = `0x0` 表示无骨骼，非零表示启用骨骼
 
 示例：
 
 ```
-pbr||vl:0x3a2f1b7c|rs:0x7c1de4a0|tri              // 基础 PBR，无变体，无骨骼
-pbr|HAS_NORMAL_MAP|vl:0x3a2f1b7c|rs:0x7c1de4a0|tri  // + 法线贴图
-pbr|HAS_NORMAL_MAP|vl:0x8b1c2e3d|rs:0x7c1de4a0|tri|+skel  // + 骨骼动画
+pbr||ml:0x3a2f1b7c|rs:0x7c1de4a0|sk:0x0                  // 基础 PBR，无变体，无骨骼
+pbr|HAS_NORMAL_MAP|ml:0x3a2f1b7c|rs:0x7c1de4a0|sk:0x0    // + 法线贴图
+pbr|HAS_NORMAL_MAP|ml:0x8b1c2e3d|rs:0x7c1de4a0|sk:0x536b6e31  // + 骨骼动画
 ```
 
 ### R4: PipelineKey 构建函数
 
-提供静态工厂方法，从各组件数据构建 key：
+提供静态工厂方法，**接收资源对象**而非零散字段（与 REQ-001 R7 一致）：
 
 ```cpp
 struct PipelineKey {
   static PipelineKey build(
     const ShaderProgramSet& shaderSet,
-    const VertexLayout& vertexLayout,
+    const Mesh& mesh,
     const RenderState& renderState,
-    PrimitiveTopology topology,
-    bool hasSkeleton
+    const SkeletonPtr& skeleton    // 可空 — 空时贡献 0
   );
 };
 ```
 
 此函数负责：
-1. 收集所有因素
-2. 按规范格式拼接字符串
+1. 对每个资源调用 `getPipelineHash()`（skeleton 为空时贡献 0）
+2. 按 R3 的规范格式拼接字符串
 3. 通过 `StringID` 构造函数注册到 `GlobalStringTable`
 4. 返回 `PipelineKey`
 
@@ -138,22 +142,21 @@ std::unordered_map<PipelineKey, VulkanPipelinePtr, PipelineKey::Hash> m_pipeline
 ```
 Scene::buildRenderingItem()
 │
-├── 从 IRenderable 收集: shaderSet, vertexLayout, renderState, topology
-├── 判断: hasSkeleton
+├── 从 RenderableSubMesh 取得: shaderSet, mesh, renderState, skeleton(可空)
 │
-├── PipelineKey::build(shaderSet, vertexLayout, renderState, topology, hasSkeleton)
+├── PipelineKey::build(shaderSet, *mesh, renderState, skeleton)
 │   │
-│   ├── 拼接规范化字符串: "pbr|HAS_NORMAL_MAP|vl:0x..|rs:0x..|tri|+skel"
+│   ├── 对每个资源调 getPipelineHash() → 拼接 "pbr|HAS_NORMAL_MAP|ml:0x..|rs:0x..|sk:0x.."
 │   └── StringID(规范化字符串) → uint32_t
 │
 └── RenderingItem { ..., pipelineKey }
         │
         ▼
-    Backend::draw(item)
+    VulkanResourceManager::getOrCreateRenderPipeline(item)
         │
         ├── m_pipelines.find(item.pipelineKey)
-        ├── hit?  → bind pipeline
-        └── miss? → createPipeline(...), cache, bind
+        ├── hit?  → return cached pipeline
+        └── miss? → createPipeline(...), cache, return
 ```
 
 ## 边界与约束
@@ -161,3 +164,14 @@ Scene::buildRenderingItem()
 - PipelineKey 是 core 内部概念，不暴露给用户（用户操作的是 MaterialTemplate、Mesh 等上层对象）
 - 规范化字符串的构造开销只在首次创建时发生，后续查找全是 `uint32_t` 比较
 - 如果未来需要新增影响 Pipeline 的因素（如 MSAA sample count），只需扩展 `build()` 函数和字符串格式
+
+## 实施状态（2026-04-13）
+
+| 需求 | 落地位置 | 状态 |
+|------|---------|------|
+| R1 PipelineKey 定义 | `src/core/resources/pipeline_key.hpp` | 已完成 |
+| R2 构成因素 | 各资源的 `getPipelineHash()`（REQ-001 R6） | 已完成 |
+| R3 字符串格式 | `pipeline_key.cpp` 中按 `ml/rs/sk` 段拼接 | 已完成（与原文档差异已同步到 R3） |
+| R4 build() 工厂 | `PipelineKey::build(ShaderProgramSet, Mesh, RenderState, SkeletonPtr)` | 已完成（与 REQ-001 R7 收敛后的签名） |
+| R5 RenderingItem.pipelineKey | `src/core/scene/scene.{hpp,cpp}` | 已完成 |
+| R6 Backend 缓存键 | `VulkanResourceManager::m_pipelines` 使用 `PipelineKey` + `PipelineKey::Hash`，`getOrCreateRenderPipeline()` 用 `item.pipelineKey` 查找/插入 | 已完成 |

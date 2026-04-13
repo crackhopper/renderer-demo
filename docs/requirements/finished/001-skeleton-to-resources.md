@@ -1,5 +1,7 @@
 # REQ-001: Skeleton 迁移至 resources 层
 
+> **Superseded by REQ-007（R6/R7 部分）**：本文档 R6「统一 `getPipelineHash()` 命名规范」与 R7「`PipelineKey::build()` 签名」由 REQ-007「结构化 Interning 驱动的 Pipeline Identity」替换——`getPipelineHash()` 让位于 `getRenderSignature(pass)`，`PipelineKey::build()` 改为两级 compose `(objectSig, materialSig)`。R1–R5（Skeleton 迁移本身）仍然有效。归档保留历史上下文；当前实现以 REQ-007 为准。
+
 ## 背景
 
 Mesh、Material 已完成重构，统一放在 `src/core/resources/` 下。Skeleton 目前仍在 `src/core/scene/components/` 中，继承自 `IComponent`。`IComponent` 仅有一个 `getRenderResources()` 方法，且只有 `Skeleton` 一个实现者，抽象层过薄无存在价值。
