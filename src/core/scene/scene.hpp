@@ -13,6 +13,7 @@ using ShaderPtr = IShaderPtr;
 // 简化 RenderingItem
 struct RenderingItem {
   ShaderPtr shaderInfo;
+  MaterialPtr material; // 材质句柄 — 用于 PipelineBuildInfo::fromRenderingItem
 
   ObjectPCPtr objectInfo;
   IRenderResourcePtr vertexBuffer;
@@ -30,12 +31,12 @@ class Scene {
 public:
   using Ptr = std::shared_ptr<Scene>;
 
-  // 暂时只支持一个 RenderableMeshPtr
-  IRenderablePtr mesh;
   CameraPtr camera;
   DirectionalLightPtr directionalLight;
 
-  Scene(IRenderablePtr mesh) : mesh(mesh) {
+  Scene(IRenderablePtr mesh) {
+    if (mesh)
+      m_renderables.push_back(std::move(mesh));
     camera = std::make_shared<Camera>(ResourcePassFlag::Forward);
     directionalLight =
         std::make_shared<DirectionalLight>(ResourcePassFlag::Forward);
@@ -45,7 +46,23 @@ public:
     return std::make_shared<Scene>(mesh);
   }
 
+  const std::vector<IRenderablePtr> &getRenderables() const {
+    return m_renderables;
+  }
+
+  void addRenderable(IRenderablePtr r) {
+    m_renderables.push_back(std::move(r));
+  }
+
   RenderingItem buildRenderingItem(StringID pass);
+
+  /// 为一个具体 renderable 构造 RenderingItem。供 FrameGraph 迭代使用。
+  RenderingItem
+  buildRenderingItemForRenderable(const IRenderablePtr &renderable,
+                                  StringID pass) const;
+
+private:
+  std::vector<IRenderablePtr> m_renderables;
 };
 
 using ScenePtr = Scene::Ptr;

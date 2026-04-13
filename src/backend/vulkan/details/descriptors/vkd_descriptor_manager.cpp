@@ -1,6 +1,5 @@
 #include "vkd_descriptor_manager.hpp"
 #include "../vk_device.hpp"
-#include "../pipelines/vkp_pipeline_slot.hpp"
 #include <array>
 #include <stdexcept>
 #include <string>
@@ -8,40 +7,23 @@
 namespace LX_core {
 namespace backend {
 
-// 内部辅助逻辑
-static VkShaderStageFlags translateStage(PipelineSlotStage stage) {
-  VkShaderStageFlags flags = 0;
-  if ((uint8_t)stage & (uint8_t)PipelineSlotStage::VERTEX)
-    flags |= VK_SHADER_STAGE_VERTEX_BIT;
-  if ((uint8_t)stage & (uint8_t)PipelineSlotStage::FRAGMENT)
-    flags |= VK_SHADER_STAGE_FRAGMENT_BIT;
-  // 如果你有 Compute Shader，继续累加...
-  return flags;
-}
+// Defined in vkp_pipeline.cpp — reused here so descriptor layout creation
+// mirrors the mapping pipeline layout uses.
+VkDescriptorType toVkDescriptorType(LX_core::ShaderPropertyType t);
+VkShaderStageFlags toVkShaderStageFlags(LX_core::ShaderStage mask);
 
-static VkDescriptorType translateDescriptorType(ResourceType type) {
-  switch (type) {
-  case ResourceType::UniformBuffer:
-    return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-  case ResourceType::CombinedImageSampler:
-    return VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-  default:
-    throw std::runtime_error("Unsupported resource type for descriptor layout");
-  }
-}
-
-// 在 .cpp 中实现
+// Equality / hash intentionally ignore the `name` field so layouts with
+// compatible shape but different member names share a single
+// VkDescriptorSetLayout.
 bool DescriptorLayoutKey::operator==(const DescriptorLayoutKey &other) const {
-  if (slots.size() != other.slots.size())
+  if (bindings.size() != other.bindings.size())
     return false;
-  for (size_t i = 0; i < slots.size(); ++i) {
-    // 必须比较所有决定 Layout 结构的维度
-    if (slots[i].binding != other.slots[i].binding ||
-        slots[i].setIndex != other.slots[i].setIndex || // 核心逻辑
-        slots[i].type != other.slots[i].type ||
-        slots[i].stage != other.slots[i].stage) {
+  for (size_t i = 0; i < bindings.size(); ++i) {
+    const auto &a = bindings[i];
+    const auto &b = other.bindings[i];
+    if (a.set != b.set || a.binding != b.binding || a.type != b.type ||
+        a.stageFlags != b.stageFlags || a.descriptorCount != b.descriptorCount)
       return false;
-    }
   }
   return true;
 }
@@ -49,19 +31,20 @@ bool DescriptorLayoutKey::operator==(const DescriptorLayoutKey &other) const {
 size_t
 DescriptorLayoutHasher::operator()(const DescriptorLayoutKey &key) const {
   size_t res = 0;
-  for (const auto &slot : key.slots) {
-    // 使用简单的位偏移和异或来混淆哈希值
-    size_t h = std::hash<uint32_t>{}(slot.binding) ^
-               (std::hash<uint32_t>{}(slot.setIndex) << 1) ^
-               (std::hash<uint32_t>{}(static_cast<uint32_t>(slot.type)) << 2);
-    res ^= h + 0x9e3779b9 + (res << 6) + (res >> 2); // 经典的 hash_combine
+  for (const auto &b : key.bindings) {
+    size_t h =
+        std::hash<uint32_t>{}(b.set) ^ (std::hash<uint32_t>{}(b.binding) << 1) ^
+        (std::hash<uint32_t>{}(static_cast<uint32_t>(b.type)) << 2) ^
+        (std::hash<uint32_t>{}(static_cast<uint32_t>(b.stageFlags)) << 3) ^
+        (std::hash<uint32_t>{}(b.descriptorCount) << 4);
+    res ^= h + 0x9e3779b9 + (res << 6) + (res >> 2);
   }
   return res;
 }
 
 // --- 析构函数 ---
 DescriptorSet::DescriptorSet(VkDescriptorSet set, VkDescriptorSetLayout layout,
-                              VulkanDescriptorManager &manager)
+                             VulkanDescriptorManager &manager)
     : m_set(set), m_layout(layout), m_manager(manager) {}
 
 DescriptorSet::~DescriptorSet() {
@@ -177,7 +160,8 @@ VulkanDescriptorManager::VulkanDescriptorManager(Token, VulkanDevice &device)
   }
 }
 
-VulkanDescriptorManagerPtr VulkanDescriptorManager::create(VulkanDevice &device) {
+VulkanDescriptorManagerPtr
+VulkanDescriptorManager::create(VulkanDevice &device) {
   return std::make_unique<VulkanDescriptorManager>(Token{}, device);
 }
 
@@ -189,7 +173,8 @@ VulkanDescriptorManager::~VulkanDescriptorManager() {
   // Layout 是跨帧共享的，只需销毁一次
   for (auto &pair : m_layoutCache) {
     if (pair.second != VK_NULL_HANDLE) {
-      vkDestroyDescriptorSetLayout(m_device.getLogicalDevice(), pair.second, nullptr);
+      vkDestroyDescriptorSetLayout(m_device.getLogicalDevice(), pair.second,
+                                   nullptr);
     }
   }
   m_layoutCache.clear();
@@ -198,8 +183,8 @@ VulkanDescriptorManager::~VulkanDescriptorManager() {
   for (uint32_t i = 0; i < m_maxFramesInFlight; ++i) {
     if (m_frameContexts[i].pool != VK_NULL_HANDLE) {
       // 销毁池会自动释放所有关联的 VkDescriptorSet 句柄
-      vkDestroyDescriptorPool(m_device.getLogicalDevice(), m_frameContexts[i].pool,
-                              nullptr);
+      vkDestroyDescriptorPool(m_device.getLogicalDevice(),
+                              m_frameContexts[i].pool, nullptr);
     }
 
     // 清理内存中的追踪容器
@@ -213,51 +198,45 @@ VkDevice VulkanDescriptorManager::getDeviceHandle() const {
 }
 
 VkDescriptorSetLayout VulkanDescriptorManager::getOrCreateLayout(
-    const std::vector<PipelineSlotDetails> &slots) {
-  // 1. 生成唯一 Key (需包含 binding, setIndex, type, stage)
-  DescriptorLayoutKey key{slots};
+    const std::vector<LX_core::ShaderResourceBinding> &bindingsIn) {
+  DescriptorLayoutKey key{bindingsIn};
 
-  // 2. 检查全局缓存（Layout 与帧无关，全过程共享）
   auto it = m_layoutCache.find(key);
   if (it != m_layoutCache.end()) {
     return it->second;
   }
 
-  // 3. 缓存未命中，创建新的 Layout
-  std::vector<VkDescriptorSetLayoutBinding> bindings;
-  bindings.reserve(slots.size());
+  std::vector<VkDescriptorSetLayoutBinding> vkBindings;
+  vkBindings.reserve(bindingsIn.size());
 
-  for (const auto &slot : slots) {
-    VkDescriptorSetLayoutBinding b{};
-    b.binding = slot.binding;
-    b.descriptorType = translateDescriptorType(slot.type);
-    b.descriptorCount = 1;                     // 简化版假设非数组
-    b.stageFlags = translateStage(slot.stage); // 调用之前的位转换函数
-    b.pImmutableSamplers =
-        nullptr; //! 不指定静态的，而是在写入descriptor的时候，带入动态的sampler
-    bindings.push_back(b);
+  for (const auto &b : bindingsIn) {
+    VkDescriptorSetLayoutBinding vb{};
+    vb.binding = b.binding;
+    vb.descriptorType = toVkDescriptorType(b.type);
+    vb.descriptorCount = b.descriptorCount > 0 ? b.descriptorCount : 1;
+    vb.stageFlags = toVkShaderStageFlags(b.stageFlags);
+    vb.pImmutableSamplers = nullptr;
+    vkBindings.push_back(vb);
   }
 
   VkDescriptorSetLayoutCreateInfo layoutInfo{
       VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-  layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
-  layoutInfo.pBindings = bindings.data();
+  layoutInfo.bindingCount = static_cast<uint32_t>(vkBindings.size());
+  layoutInfo.pBindings = vkBindings.data();
 
   VkDescriptorSetLayout layout;
-  if (vkCreateDescriptorSetLayout(m_device.getLogicalDevice(), &layoutInfo, nullptr,
-                                  &layout) != VK_SUCCESS) {
+  if (vkCreateDescriptorSetLayout(m_device.getLogicalDevice(), &layoutInfo,
+                                  nullptr, &layout) != VK_SUCCESS) {
     throw std::runtime_error("Vulkan: Failed to create descriptor set layout!");
   }
 
-  // 4. 存入缓存并返回
   m_layoutCache[key] = layout;
   return layout;
 }
 
 DescriptorSetPtr VulkanDescriptorManager::allocateSet(
-    const std::vector<PipelineSlotDetails> &slots) {
-  // 1. 获取（或创建）该 Slot 组合对应的 Layout
-  VkDescriptorSetLayout layout = getOrCreateLayout(slots);
+    const std::vector<LX_core::ShaderResourceBinding> &bindingsIn) {
+  VkDescriptorSetLayout layout = getOrCreateLayout(bindingsIn);
 
   // 2. 获取当前帧的上下文
   auto &context = m_frameContexts[m_currentFrameIndex];
@@ -277,8 +256,8 @@ DescriptorSetPtr VulkanDescriptorManager::allocateSet(
     allocInfo.descriptorSetCount = 1;
     allocInfo.pSetLayouts = &layout;
 
-    VkResult result =
-        vkAllocateDescriptorSets(m_device.getLogicalDevice(), &allocInfo, &setHandle);
+    VkResult result = vkAllocateDescriptorSets(m_device.getLogicalDevice(),
+                                               &allocInfo, &setHandle);
 
     if (result != VK_SUCCESS) {
       // 这里可以扩展：如果池满了，动态创建新池

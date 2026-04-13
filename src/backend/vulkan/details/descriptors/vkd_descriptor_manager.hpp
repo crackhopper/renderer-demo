@@ -1,24 +1,19 @@
 #pragma once
+#include "core/resources/shader.hpp"
+#include "../vk_device.hpp"
+#include <vulkan/vulkan.h>
 #include <map>
 #include <memory>
 #include <unordered_map>
 #include <vector>
-#include <vulkan/vulkan.h>
-#include "../vk_device.hpp"
 
 namespace LX_core {
 namespace backend {
 
-// VulkanDevice is fully defined via vk_device.hpp
-
-// 前置声明
 class DescriptorSet;
-class DescriptorSet;
-struct PipelineSlotDetails;
 struct DescriptorLayoutKey;
 class DescriptorLayoutHasher;
 
-// Descriptor 更新信息 (moved before DescriptorSet to fix forward reference)
 struct DescriptorUpdateInfo {
   uint32_t binding = 0;
   VkDescriptorType type = VK_DESCRIPTOR_TYPE_MAX_ENUM;
@@ -27,10 +22,8 @@ struct DescriptorUpdateInfo {
   const VkDescriptorImageInfo *imageInfo = nullptr;
 };
 
-// DescriptorSet 的智能指针
 using DescriptorSetPtr = std::unique_ptr<DescriptorSet>;
 
-// 描述符集合
 class DescriptorSet {
 public:
   DescriptorSet(VkDescriptorSet set, VkDescriptorSetLayout layout,
@@ -40,7 +33,7 @@ public:
   VkDescriptorSet getHandle() const { return m_set; }
 
   void updateBuffer(uint32_t binding, VkDescriptorBufferInfo bufferInfo,
-                   VkDescriptorType type);
+                    VkDescriptorType type);
   void updateImage(uint32_t binding, VkDescriptorImageInfo imageInfo,
                    VkDescriptorType type);
   void updateBatch(const std::vector<DescriptorUpdateInfo> &updates);
@@ -51,9 +44,12 @@ private:
   class VulkanDescriptorManager &m_manager;
 };
 
-// Layout 唯一性键值
+/// Layout cache key derived from a list of reflected shader bindings (all
+/// belonging to the same descriptor set). Hashing deliberately ignores the
+/// `name` field so layouts with compatible shape but different member names
+/// share a single VkDescriptorSetLayout.
 struct DescriptorLayoutKey {
-  std::vector<PipelineSlotDetails> slots;
+  std::vector<LX_core::ShaderResourceBinding> bindings;
   bool operator==(const DescriptorLayoutKey &other) const;
 };
 
@@ -62,11 +58,9 @@ public:
   size_t operator()(const DescriptorLayoutKey &key) const;
 };
 
-// 前置声明
 class VulkanDescriptorManager;
 using VulkanDescriptorManagerPtr = std::unique_ptr<VulkanDescriptorManager>;
 
-// 描述符管理器
 class VulkanDescriptorManager {
 public:
   struct Token {};
@@ -76,9 +70,15 @@ public:
 
   static VulkanDescriptorManagerPtr create(VulkanDevice &device);
 
+  /// Build (or fetch from the cache) a VkDescriptorSetLayout for the given
+  /// reflection bindings. Caller is responsible for ensuring all bindings
+  /// belong to the same descriptor set index.
   VkDescriptorSetLayout getOrCreateLayout(
-      const std::vector<PipelineSlotDetails> &slots);
-  DescriptorSetPtr allocateSet(const std::vector<PipelineSlotDetails> &slots);
+      const std::vector<LX_core::ShaderResourceBinding> &bindings);
+
+  /// Allocate a descriptor set with the layout derived from the given bindings.
+  DescriptorSetPtr
+  allocateSet(const std::vector<LX_core::ShaderResourceBinding> &bindings);
 
   void beginFrame(uint32_t currentFrameIndex);
   void returnSet(VkDescriptorSet set, VkDescriptorSetLayout layout);
@@ -95,7 +95,8 @@ private:
     VkDescriptorPool pool = VK_NULL_HANDLE;
     std::unordered_map<VkDescriptorSetLayout, std::vector<VkDescriptorSet>>
         freeSets;
-    std::vector<std::pair<VkDescriptorSet, VkDescriptorSetLayout>> pendingReturn;
+    std::vector<std::pair<VkDescriptorSet, VkDescriptorSetLayout>>
+        pendingReturn;
   };
 
   std::vector<FrameContext> m_frameContexts;

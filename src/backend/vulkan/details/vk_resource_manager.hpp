@@ -1,7 +1,9 @@
 #pragma once
 
 #include "core/gpu/render_resource.hpp"
+#include "core/resources/pipeline_build_info.hpp"
 #include "core/resources/pipeline_key.hpp"
+#include "pipelines/pipeline_cache.hpp"
 #include "pipelines/vkp_pipeline.hpp"
 #include <memory>
 #include <optional>
@@ -14,7 +16,7 @@
 
 namespace LX_core {
 struct RenderingItem;
-}
+} // namespace LX_core
 
 namespace LX_core::backend {
 
@@ -46,7 +48,6 @@ public:
     return p;
   }
 
-  // 禁止拷贝
   VulkanResourceManager(const VulkanResourceManager &) = delete;
   VulkanResourceManager &operator=(const VulkanResourceManager &) = delete;
 
@@ -57,16 +58,22 @@ public:
   void initializeRenderPassAndPipeline(VkSurfaceFormatKHR surfaceFormat,
                                        VkFormat depthFormat);
 
-  // 快捷访问接口 - lookup functions return optional references since resource
-  // may not exist
   std::optional<std::reference_wrapper<VulkanBuffer>> getBuffer(void *handle);
   std::optional<std::reference_wrapper<VulkanTexture>> getTexture(void *handle);
   std::optional<std::reference_wrapper<VulkanShader>> getShader(void *handle);
   VulkanRenderPass &getRenderPass();
+
+  /// Delegates to the embedded PipelineCache. Kept for backward compatibility
+  /// with tests and the renderer hot path; prefers a preloaded cache.
   VulkanPipeline &getOrCreateRenderPipeline(const LX_core::RenderingItem &item);
 
+  /// Bulk preload — intended to be called once per scene init from the
+  /// VulkanRenderer after building a FrameGraph.
+  void preloadPipelines(const std::vector<LX_core::PipelineBuildInfo> &infos);
+
+  PipelineCache &getPipelineCache() { return *m_pipelineCache; }
+
 private:
-  // 内部创建与更新逻辑
   std::shared_ptr<VulkanAnyResource>
   createGpuResource(const IRenderResourcePtr &cpuRes);
   void updateGpuResource(std::shared_ptr<VulkanAnyResource> &gpuRes,
@@ -78,9 +85,7 @@ private:
   std::unordered_set<void *> m_activeHandles;
 
   std::unique_ptr<VulkanRenderPass> m_renderPass;
-  std::unordered_map<LX_core::PipelineKey, VulkanPipelinePtr,
-                      LX_core::PipelineKey::Hash>
-      m_pipelines;
+  std::unique_ptr<PipelineCache> m_pipelineCache;
 };
 
 } // namespace LX_core::backend

@@ -117,6 +117,8 @@ MaterialInstance::getDescriptorResources() const {
   // list appears in a deterministic order matching the shader layout.
   // `CombinedTextureSampler` inherits from `IRenderResource`, so the
   // conversion is a plain base-class upcast — no dynamic_cast needed.
+  // Also stamps the reflected binding name onto each texture so backend
+  // descriptor routing can find it by name.
   std::vector<std::pair<uint32_t, IRenderResourcePtr>> sorted;
   sorted.reserve(m_textures.size());
   for (const auto &[id, tex] : m_textures) {
@@ -125,6 +127,7 @@ MaterialInstance::getDescriptorResources() const {
     auto b = m_template->findBinding(id);
     if (!b)
       continue;
+    tex->setBindingName(id);
     const uint32_t key = (b->get().set << 16) | b->get().binding;
     sorted.emplace_back(key, std::static_pointer_cast<IRenderResource>(tex));
   }

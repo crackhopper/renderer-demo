@@ -329,3 +329,40 @@ draw(RenderingItem item)
 - **REQ-005（`MaterialInstance` 是唯一 `IMaterial` 实现）** — R3 `FrameGraph::buildFromScene()` 遍历 renderable 时假设 material 由反射驱动
 - **REQ-007（结构化 Interning Pipeline Identity）** — R3/R7 的"按 pass 扫描"路径消费 `Scene::buildRenderingItem(StringID pass)` 与 `IRenderable::getRenderSignature(pass)`；本需求的 `FramePass.name` 从 `std::string` 迁移为 `StringID`，与 `Pass_Forward / Pass_Shadow` 常量保持一致
 - 现有 `ShaderReflector` / `ShaderResourceBinding`（反射信息完备性）—— R6 强依赖，由 REQ-004 补齐 members
+
+## 实施状态
+
+已完成（2026-04-13）— 通过 openspec 变更 `pipeline-prebuilding` 落地，分三个阶段按 tasks.md 顺序推进，每阶段 build + test 回归后再进入下一阶段。
+
+**阶段 1（纯 additive）**
+- `src/core/resources/pipeline_build_info.{hpp,cpp}` — `PipelineBuildInfo` 结构 + `fromRenderingItem` 工厂 + `PushConstantRange` 定义
+- `src/core/gpu/image_format.hpp` — `ImageFormat` 枚举
+- `src/core/gpu/render_target.{hpp,cpp}` — `RenderTarget` 结构 + 稳定哈希
+- Backend `toVkFormat(ImageFormat)` helper（`vk_resource_manager.cpp`）
+- `RenderingItem` 新增 `MaterialPtr material` 字段；`Scene::buildRenderingItem` 自动填充
+- 测试 `test_pipeline_build_info.cpp` — 7 个用例全部通过
+
+**阶段 2（帧结构）**
+- `src/core/scene/render_queue.{hpp,cpp}` — `RenderQueue` + 按 `PipelineKey` 排序去重
+- `src/core/scene/frame_graph.{hpp,cpp}` — `FrameGraph` + `FramePass`（`StringID name`，匹配 REQ-007 pass 常量）+ `buildFromScene` / `collectAllPipelineBuildInfos`
+- `Scene::m_renderables` 从单字段迁移到 `std::vector<IRenderablePtr>`；新增 `getRenderables()` / `addRenderable` / `buildRenderingItemForRenderable`
+- 测试 `test_frame_graph.cpp` — 6 个用例全部通过
+
+**阶段 3（破坏性替换，原子落地）**
+- `IRenderResource::getBindingName() const` 新虚函数；`Camera/Light/Skeleton/UboByteBufferResource` 返回 `StringID("CameraUBO"/"LightUBO"/"Bones"/"MaterialUBO")`
+- `CombinedTextureSampler` 重构：删 `m_slotId` 字段与构造参数；新增 `setBindingName` + `m_bindingName`，由 `MaterialInstance::getDescriptorResources` 在返回前填入反射绑定名
+- **彻底删除**：`enum class PipelineSlotId`、`IRenderResource::getPipelineSlotId`、`vkp_pipeline_slot.hpp`、`forward_pipeline_slots.hpp`、`blinnPhongForwardSlots()`、`blinnPhongPushConstants()`、`vk_resource_manager.cpp` 中的 `shaderName == "blinnphong_0"` 分支
+- `VulkanPipeline` 完全重构：构造函数接收 `const PipelineBuildInfo &`；`m_bindings: vector<ShaderResourceBinding>` 替代 `m_slots`；`loadShaders` 从 `m_stages.bytecode` 创建 `VkShaderModule` 而非读文件；`createLayout` 按反射 `set` 字段分组构造 descriptor set layouts；rasterizer / depthStencil / colorBlend / inputAssembly 全部从 `m_renderState` / `m_topology` 推导
+- `VulkanShaderGraphicsPipeline::create(device, buildInfo, renderPass, shaderName)` 一次性构造完整 pipeline
+- `VulkanDescriptorManager::getOrCreateLayout` / `allocateSet` 签名改为 `vector<ShaderResourceBinding>`；`DescriptorLayoutKey` 对应迁移；hash 按 `(set, binding, type, stageFlags, descriptorCount)` 五元组，忽略 `name` 以允许跨 shader 共享 layout
+- `VulkanCommandBuffer::bindResources` 删 `findBySlotId`；改为构造 `unordered_map<StringID, IRenderResourcePtr>` 按反射 binding `name` 匹配
+- 新建 `src/backend/vulkan/details/pipelines/pipeline_cache.{hpp,cpp}` 独立类；`VulkanResourceManager::m_pipelines` 迁移到 `m_pipelineCache`；`getOrCreateRenderPipeline(item)` 变成薄壳 delegator；新增 `preloadPipelines(infos)` 与 `getPipelineCache()` 访问器
+- `VulkanRenderer::initScene` 增加 `FrameGraph` 构造 + `preloadPipelines` 调用
+- 测试 `test_pipeline_cache.cpp` 覆盖 `find` / `getOrCreate` / `preload` / 幂等性（GPU 路径；headless 环境优雅 SKIP）
+
+**验证**
+- `grep -rn "PipelineSlotId\|PipelineSlotDetails\|blinnPhongForwardSlots"` 归零
+- `openspec validate pipeline-prebuilding --strict` 通过
+- 全量 `cmake --build ./build` 绿，0 warning 0 error
+- `test_string_table` / `test_pipeline_identity` / `test_pipeline_build_info` / `test_frame_graph` / `test_material_instance` 全部通过
+- Vulkan 集成测试 `test_vulkan_*` 与 `test_pipeline_cache` 编译链接通过，headless 环境无显示时按约定 SKIP

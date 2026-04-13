@@ -11,6 +11,9 @@ set(TEST_INTEGRATION_EXE_LIST
   test_string_table
   test_material_instance
   test_pipeline_identity
+  test_pipeline_build_info
+  test_frame_graph
+  test_pipeline_cache
 
   # test_render_sphere
   # test_render_model

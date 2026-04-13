@@ -255,10 +255,10 @@ public:
   ResourceType getType() const override { return ResourceType::UniformBuffer; }
   const void *getRawData() const override { return m_buffer->data(); }
   u32 getByteSize() const override { return m_byteSize; }
-  // TODO(REQ-003b): drop once reflection-driven binding replaces the
-  // `forward_pipeline_slots.hpp` lookup table.
-  PipelineSlotId getPipelineSlotId() const override {
-    return PipelineSlotId::MaterialUBO;
+
+  StringID getBindingName() const override {
+    static const StringID kName("MaterialUBO");
+    return kName;
   }
 
 private:

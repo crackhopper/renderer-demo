@@ -1,70 +1,71 @@
 #pragma once
 
 /**
- * Pipeline 基类
+ * VulkanPipeline — reflection-driven graphics pipeline.
  *
- * 从这个基类，我们会构造若干个通用的pipeline子类。
- *
+ * Consumes a `LX_core::PipelineBuildInfo` end-to-end: SPIR-V bytecode from
+ * `stages`, descriptor set layouts from `bindings`, vertex input from
+ * `vertexLayout`, fixed-function state from `renderState`, topology from
+ * `topology`, and push constant range from `pushConstant`.
  */
 
+#include "core/resources/pipeline_build_info.hpp"
+#include "core/resources/shader.hpp"
 #include "core/resources/vertex_buffer.hpp"
-#include "vkp_pipeline_slot.hpp"
-#include <memory>
+#include <vulkan/vulkan.h>
 #include <array>
+#include <memory>
 #include <string>
 #include <vector>
-#include <vulkan/vulkan.h>
 
 namespace LX_core {
 namespace backend {
 
 class VulkanDevice;
 
-struct PushConstantDetails {
-  VkShaderStageFlags stageFlags;
-  uint32_t offset;
-  uint32_t size;
-};
-
 class VulkanPipeline;
 using VulkanPipelinePtr = std::unique_ptr<VulkanPipeline>;
+
 class VulkanPipeline {
 protected:
   struct Token {};
 
 public:
-  explicit VulkanPipeline(Token, VulkanDevice &device, VkExtent2D extent,
-                             const std::string &shaderName,
-                             PipelineSlotDetails *slots, uint32_t slotCount,
-                             const PushConstantDetails &pushConstants);
+  explicit VulkanPipeline(Token, VulkanDevice &device,
+                          const PipelineBuildInfo &buildInfo);
   virtual ~VulkanPipeline();
 
-  virtual std::string getPipelineId() const = 0;
-  virtual std::string getShaderName() const = 0;
-  /// Vertex input for this pipeline; must match bound mesh layouts at draw time.
-  virtual const VertexLayout &referenceVertexLayout() const = 0;
+  virtual std::string getPipelineId() const { return {}; }
+  virtual std::string getShaderName() const { return {}; }
+  /// Vertex input reference (forwards to stored buildInfo layout).
+  virtual const VertexLayout &referenceVertexLayout() const {
+    return m_vertexLayout;
+  }
 
-  virtual void loadShaders();
-  virtual void createLayout();
-  virtual VkPipelineVertexInputStateCreateInfo getVertexInputStateCreateInfo();
-  virtual VkPipelineInputAssemblyStateCreateInfo getInputAssemblyStateCreateInfo();
-  virtual VkPipelineShaderStageCreateInfo getVertexShaderStageCreateInfo();
-  virtual VkPipelineShaderStageCreateInfo getFragmentShaderStageCreateInfo();
-  virtual VkPipelineViewportStateCreateInfo getViewportStateCreateInfo();
-  virtual VkPipelineDynamicStateCreateInfo getDynamicStateCreateInfo();
-  virtual VkPipelineRasterizationStateCreateInfo getRasterizerStateCreateInfo();
-  virtual VkPipelineMultisampleStateCreateInfo getMultisampleStateCreateInfo();
-  virtual VkPipelineDepthStencilStateCreateInfo getDepthStencilStateCreateInfo();
-  virtual VkPipelineColorBlendStateCreateInfo getColorBlendStateCreateInfo();
+  void loadShaders();
+  void createLayout();
+
+  VkPipelineVertexInputStateCreateInfo getVertexInputStateCreateInfo();
+  VkPipelineInputAssemblyStateCreateInfo getInputAssemblyStateCreateInfo();
+  VkPipelineShaderStageCreateInfo getVertexShaderStageCreateInfo();
+  VkPipelineShaderStageCreateInfo getFragmentShaderStageCreateInfo();
+  VkPipelineViewportStateCreateInfo getViewportStateCreateInfo();
+  VkPipelineDynamicStateCreateInfo getDynamicStateCreateInfo();
+  VkPipelineRasterizationStateCreateInfo getRasterizerStateCreateInfo();
+  VkPipelineMultisampleStateCreateInfo getMultisampleStateCreateInfo();
+  VkPipelineDepthStencilStateCreateInfo getDepthStencilStateCreateInfo();
+  VkPipelineColorBlendStateCreateInfo getColorBlendStateCreateInfo();
 
   VkPipeline buildGraphicsPpl(VkRenderPass renderPass);
 
   VkPipeline getHandle() const { return m_pipeline; }
   VkPipelineLayout getLayout() const { return m_layout; }
 
-  const std::vector<PipelineSlotDetails> &getSlots() const { return m_slots; }
-  const PushConstantDetails &getPushConstantDetails() const {
-    return m_pushConstants;
+  const std::vector<LX_core::ShaderResourceBinding> &getBindings() const {
+    return m_bindings;
+  }
+  const PushConstantRange &getPushConstantRange() const {
+    return m_pushConstant;
   }
 
 protected:
@@ -73,22 +74,25 @@ protected:
   VkPipeline m_pipeline = VK_NULL_HANDLE;
   VkPipelineLayout m_layout = VK_NULL_HANDLE;
 
-  std::string m_shaderName;
-  std::vector<PipelineSlotDetails> m_slots;
-  PushConstantDetails m_pushConstants;
+  // Data pulled from PipelineBuildInfo in the constructor.
+  std::vector<LX_core::ShaderStageCode> m_stages;
+  std::vector<LX_core::ShaderResourceBinding> m_bindings;
+  VertexLayout m_vertexLayout;
+  RenderState m_renderState;
+  PrimitiveTopology m_topology = PrimitiveTopology::TriangleList;
+  PushConstantRange m_pushConstant;
 
   VkShaderModule m_vertShader = VK_NULL_HANDLE;
   VkShaderModule m_fragShader = VK_NULL_HANDLE;
 
   VkOffset2D m_offset = {0, 0};
-  VkExtent2D m_extent = {0, 0};
+  VkExtent2D m_extent = {1, 1}; // dynamic, overridden at cmd-buffer time
 
-  // Stored to keep pointer members valid during vkCreateGraphicsPipelines.
   VkViewport m_viewport{};
   VkRect2D m_scissor{};
   VkPipelineColorBlendAttachmentState m_colorBlendAttachment{};
-  std::array<VkDynamicState, 2> m_dynamicStates{
-      VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+  std::array<VkDynamicState, 2> m_dynamicStates{VK_DYNAMIC_STATE_VIEWPORT,
+                                                VK_DYNAMIC_STATE_SCISSOR};
 
   VkSampleCountFlagBits m_msaaSamples = VK_SAMPLE_COUNT_1_BIT;
 

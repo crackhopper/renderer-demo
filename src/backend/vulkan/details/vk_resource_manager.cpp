@@ -1,11 +1,12 @@
 #include "vk_resource_manager.hpp"
-#include "commands/vkc_cmdbuffer_manager.hpp"
+#include "core/gpu/image_format.hpp"
 #include "core/resources/index_buffer.hpp"
+#include "core/resources/pipeline_build_info.hpp"
 #include "core/resources/shader.hpp"
 #include "core/resources/texture.hpp"
 #include "core/resources/vertex_buffer.hpp"
 #include "core/scene/scene.hpp"
-#include "pipelines/forward_pipeline_slots.hpp"
+#include "commands/vkc_cmdbuffer_manager.hpp"
 #include "pipelines/vkp_shader_graphics.hpp"
 #include "render_objects/vkr_renderpass.hpp"
 #include "resources/vkr_buffer.hpp"
@@ -29,10 +30,29 @@ VkFormat toVkFormat(TextureFormat format) {
     throw std::runtime_error("Unsupported TextureFormat");
   }
 }
+
+VkFormat toVkFormat(LX_core::ImageFormat format) {
+  switch (format) {
+  case LX_core::ImageFormat::RGBA8:
+    return VK_FORMAT_R8G8B8A8_UNORM;
+  case LX_core::ImageFormat::BGRA8:
+    return VK_FORMAT_B8G8R8A8_UNORM;
+  case LX_core::ImageFormat::R8:
+    return VK_FORMAT_R8_UNORM;
+  case LX_core::ImageFormat::D32Float:
+    return VK_FORMAT_D32_SFLOAT;
+  case LX_core::ImageFormat::D24UnormS8:
+    return VK_FORMAT_D24_UNORM_S8_UINT;
+  case LX_core::ImageFormat::D32FloatS8:
+    return VK_FORMAT_D32_SFLOAT_S8_UINT;
+  }
+  throw std::runtime_error("Unsupported ImageFormat");
+}
 } // namespace
 
 VulkanResourceManager::VulkanResourceManager(Token, VulkanDevice &device)
-    : m_device(device) {}
+    : m_device(device),
+      m_pipelineCache(std::make_unique<PipelineCache>(device)) {}
 
 VulkanResourceManager::~VulkanResourceManager() {
   if (m_device.getLogicalDevice() != VK_NULL_HANDLE) {
@@ -94,7 +114,8 @@ VulkanResourceManager::createGpuResource(const IRenderResourcePtr &cpuRes) {
 
   case ResourceType::Shader:
     // Pipelines load SPIR-V from disk (`VulkanShader`); `IShader` on the CPU
-    // side is for reflection / material binding, not standalone GPU upload here.
+    // side is for reflection / material binding, not standalone GPU upload
+    // here.
     throw std::runtime_error(
         "syncResource: ResourceType::Shader (IShader) has no GPU mirror in "
         "VulkanResourceManager; use pipeline file paths");
@@ -153,7 +174,7 @@ void VulkanResourceManager::updateGpuResource(
                                 VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
 
           cmdBufferManager.endSingleTimeCommands(std::move(cmd),
-                                                   m_device.getGraphicsQueue());
+                                                 m_device.getGraphicsQueue());
         }
         // Shaders are immutable for this initial framework; no updates needed.
       },
@@ -210,49 +231,16 @@ VulkanRenderPass &VulkanResourceManager::getRenderPass() {
   return *m_renderPass;
 }
 
-VulkanPipeline &
-VulkanResourceManager::getOrCreateRenderPipeline(const LX_core::RenderingItem &item) {
-  auto it = m_pipelines.find(item.pipelineKey);
-  if (it != m_pipelines.end()) {
-    return *it->second;
-  }
+VulkanPipeline &VulkanResourceManager::getOrCreateRenderPipeline(
+    const LX_core::RenderingItem &item) {
+  return m_pipelineCache->getOrCreate(
+      LX_core::PipelineBuildInfo::fromRenderingItem(item),
+      m_renderPass->getHandle());
+}
 
-  auto vb = std::dynamic_pointer_cast<LX_core::IVertexBuffer>(item.vertexBuffer);
-  auto ib = std::dynamic_pointer_cast<LX_core::IndexBuffer>(item.indexBuffer);
-  if (!vb || !ib) {
-    throw std::runtime_error(
-        "getOrCreateRenderPipeline: missing vertex or index buffer");
-  }
-  if (!item.shaderInfo) {
-    throw std::runtime_error("getOrCreateRenderPipeline: missing shader (IShader)");
-  }
-
-  const std::string shaderName = item.shaderInfo->getShaderName();
-  if (shaderName.empty()) {
-    throw std::runtime_error(
-        "getOrCreateRenderPipeline: IShader::getShaderName() is empty");
-  }
-
-  std::vector<PipelineSlotDetails> slots;
-  PushConstantDetails pushConstants{};
-  if (shaderName == "blinnphong_0") {
-    slots = blinnPhongForwardSlots();
-    pushConstants = blinnPhongPushConstants();
-  } else {
-    throw std::runtime_error("No pipeline slot table for shader: " + shaderName);
-  }
-
-  VkExtent2D dummyExtent{1, 1};
-  VulkanPipelinePtr pipeline = VulkanShaderGraphicsPipeline::create(
-      m_device, dummyExtent, shaderName, vb->getLayout(), std::move(slots),
-      pushConstants, ib->getTopology());
-  pipeline->loadShaders();
-  pipeline->createLayout();
-  pipeline->buildGraphicsPpl(m_renderPass->getHandle());
-
-  VulkanPipeline *raw = pipeline.get();
-  m_pipelines[item.pipelineKey] = std::move(pipeline);
-  return *raw;
+void VulkanResourceManager::preloadPipelines(
+    const std::vector<LX_core::PipelineBuildInfo> &infos) {
+  m_pipelineCache->preload(infos, m_renderPass->getHandle());
 }
 
 } // namespace LX_core::backend

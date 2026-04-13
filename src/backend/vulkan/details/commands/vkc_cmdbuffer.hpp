@@ -1,10 +1,10 @@
 #pragma once
+#include "core/scene/scene.hpp"
+#include "../pipelines/vkp_pipeline.hpp"
+#include "../vk_device.hpp"
+#include <vulkan/vulkan.h>
 #include <memory>
 #include <vector>
-#include <vulkan/vulkan.h>
-#include "core/scene/scene.hpp"
-#include "../vk_device.hpp"
-#include "../pipelines/vkp_pipeline.hpp"
 
 namespace LX_core::backend {
 
@@ -22,7 +22,8 @@ public:
   void end();
 
   void beginRenderPass(VkRenderPass renderPass, VkFramebuffer framebuffer,
-                      VkExtent2D extent, const std::vector<VkClearValue> &clearValues);
+                       VkExtent2D extent,
+                       const std::vector<VkClearValue> &clearValues);
   void endRenderPass() { vkCmdEndRenderPass(m_handle); }
 
   void setViewport(uint32_t width, uint32_t height);
@@ -30,7 +31,8 @@ public:
 
   void bindPipeline(VulkanPipeline &pipeline);
 
-  void bindResources(VulkanResourceManager &resourceManager, VulkanPipeline &pipeline, const RenderingItem &item);
+  void bindResources(VulkanResourceManager &resourceManager,
+                     VulkanPipeline &pipeline, const RenderingItem &item);
 
   void drawItem(const RenderingItem &item);
 
@@ -63,17 +65,26 @@ public:
   void pipelineBarrier(VkPipelineStageFlags srcStage,
                        VkPipelineStageFlags dstStage,
                        VkImageMemoryBarrier barrier) {
-    vkCmdPipelineBarrier(m_handle, srcStage, dstStage, 0, 0, nullptr, 0, nullptr,
-                         1, &barrier);
+    vkCmdPipelineBarrier(m_handle, srcStage, dstStage, 0, 0, nullptr, 0,
+                         nullptr, 1, &barrier);
   }
 
 private:
+  // Push constant info captured from the last bound pipeline. Matches the
+  // engine-wide convention set in `PushConstantRange` (128 bytes,
+  // vertex+fragment stages by default); populated in `bindPipeline`.
+  struct PushConstantSnapshot {
+    VkShaderStageFlags stageFlags = 0;
+    uint32_t offset = 0;
+    uint32_t size = 0;
+  };
+
   VkCommandBuffer m_handle = VK_NULL_HANDLE;
   VulkanDevice &m_device;
 
   // Captured from the last bound pipeline; used by drawItem().
   VkPipelineLayout m_pipelineLayout = VK_NULL_HANDLE;
-  PushConstantDetails m_pushConstantsDetails{};
+  PushConstantSnapshot m_pushConstants{};
 };
 
 using VulkanCommandBufferPtr = std::unique_ptr<VulkanCommandBuffer>;

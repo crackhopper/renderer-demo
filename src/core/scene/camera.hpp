@@ -19,23 +19,19 @@ struct alignas(16) CameraUBO : public IRenderResource {
 
   CameraUBO(ResourcePassFlag passFlag) : m_passFlag(passFlag) {}
 
-  virtual ResourcePassFlag getPassFlag() const override {
-    return m_passFlag;
-  }
+  virtual ResourcePassFlag getPassFlag() const override { return m_passFlag; }
   virtual ResourceType getType() const override {
     return ResourceType::UniformBuffer;
   }
-  virtual const void *getRawData() const override {
-    return &param;
-  }
+  virtual const void *getRawData() const override { return &param; }
   static constexpr usize ResourceSize = sizeof(Param);
-  virtual u32 getByteSize() const override {
-    return ResourceSize;
+  virtual u32 getByteSize() const override { return ResourceSize; }
+
+  StringID getBindingName() const override {
+    static const StringID kName("CameraUBO");
+    return kName;
   }
 
-  virtual PipelineSlotId getPipelineSlotId() const override {
-    return PipelineSlotId::CameraUBO;
-  }
 private:
   ResourcePassFlag m_passFlag = ResourcePassFlag::Forward;
 };

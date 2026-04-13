@@ -1,5 +1,6 @@
 #include "vk_renderer.hpp"
 #include "core/gpu/render_resource.hpp"
+#include "core/scene/frame_graph.hpp"
 #include "core/scene/pass.hpp"
 #include "infra/window/window.hpp"
 #include "details/commands/vkc_cmdbuffer_manager.hpp"
@@ -145,6 +146,17 @@ public:
       resourceManager->syncResource(*cmdBufferMgr, cpuRes);
     }
     resourceManager->collectGarbage();
+
+    // Pre-build every pipeline the scene needs. Runtime cache misses still
+    // work via getOrCreateRenderPipeline(item) but emit a warning log.
+    {
+      LX_core::FrameGraph frameGraph;
+      frameGraph.addPass(LX_core::FramePass{LX_core::Pass_Forward, {}, {}});
+      frameGraph.buildFromScene(*scene);
+      auto infos = frameGraph.collectAllPipelineBuildInfos();
+      resourceManager->preloadPipelines(infos);
+    }
+
     if (rendererDebugEnabled()) {
       std::cerr << "[RendererDebug] initScene: vertexBytes="
                 << renderItem.vertexBuffer->getByteSize()

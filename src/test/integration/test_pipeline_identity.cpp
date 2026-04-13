@@ -55,9 +55,6 @@ public:
 
   const void *getRawData() const override { return nullptr; }
   u32 getByteSize() const override { return 0; }
-  PipelineSlotId getPipelineSlotId() const override {
-    return PipelineSlotId::MaterialUBO;
-  }
 
 private:
   std::vector<ShaderStageCode> m_stages;

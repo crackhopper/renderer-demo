@@ -159,17 +159,21 @@ The VulkanCommandBuffer SHALL support:
 
 ### Requirement: VulkanPipeline shall create graphics pipelines with shader stages
 
-The VulkanPipeline SHALL support:
-- Creating pipeline layout with descriptor set layouts and push constant ranges
-- Loading vertex and fragment shader modules
-- Defining vertex input state from vertex format
-- Configuring rasterization, input assembly, viewport, depth stencil, color blending
-- Creating complete graphics pipeline
+The VulkanPipeline SHALL consume a `LX_core::PipelineBuildInfo` (from the `pipeline-build-info` capability) as its single construction input, and SHALL support:
 
-#### Scenario: Dynamic graphics pipeline creation from draw state
+- Creating `VkShaderModule`s from `buildInfo.stages` (bytecode only; no filesystem loads at this layer)
+- Building `VkDescriptorSetLayout`s from `buildInfo.bindings` (reflected `ShaderResourceBinding` list) — one layout per distinct `set` number, each layout populated from the `(binding, type, stageFlags)` of every `ShaderResourceBinding` whose `set` matches
+- Creating a pipeline layout with the derived descriptor set layouts and the `buildInfo.pushConstant` range
+- Defining vertex input state from `buildInfo.vertexLayout`
+- Configuring rasterization, input assembly, viewport, depth stencil, color blending from `buildInfo.renderState` and `buildInfo.topology`
+- Creating the final `VkPipeline` via `vkCreateGraphicsPipelines`
 
-- **WHEN** Creating a graphics pipeline for a shader and mesh whose vertex layout includes position, normal, and UV (or equivalent layout required by that shader)
-- **THEN** Pipeline SHALL be created with shader stages, vertex input state, rasterization, and all fixed-function state configured for that combination
+The pipeline class SHALL NOT accept any legacy `PipelineSlotDetails` vector and SHALL NOT key descriptor layout construction on hardcoded slot enums.
+
+#### Scenario: Dynamic graphics pipeline creation from PipelineBuildInfo
+
+- **WHEN** A caller invokes pipeline creation with a `PipelineBuildInfo` whose `bindings` contains a UBO at set 0 binding 0, a sampler at set 2 binding 1, and whose `vertexLayout` includes position+normal+uv
+- **THEN** The constructed `VulkanPipeline` exposes exactly the descriptor set layouts and vertex input attributes described by the build info, with no reference to any shader-name lookup table
 
 ### Requirement: VulkanRenderer shall implement complete render lifecycle
 

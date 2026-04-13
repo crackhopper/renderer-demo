@@ -48,9 +48,9 @@ static TexturePtr createWhiteTexture(u32 width = 1, u32 height = 1) {
 // TODO: 暂时空余采样器信息。
 class CombinedTextureSampler : public IRenderResource {
 public:
-  CombinedTextureSampler(TexturePtr texture, PipelineSlotId slotId,
+  CombinedTextureSampler(TexturePtr texture,
                          ResourcePassFlag passFlag = ResourcePassFlag::Forward)
-      : m_texture(texture), m_slotId(slotId), m_passFlag(passFlag) {}
+      : m_texture(texture), m_passFlag(passFlag) {}
 
   TexturePtr texture() const { return m_texture; }
 
@@ -59,16 +59,23 @@ public:
     setDirty();
   }
 
+  /// `MaterialInstance::getDescriptorResources()` fills this with the binding
+  /// name resolved from the template before handing the texture off to the
+  /// backend descriptor path. Empty until the material routes it.
+  void setBindingName(StringID name) { m_bindingName = name; }
+
   ResourcePassFlag getPassFlag() const override { return m_passFlag; }
-  ResourceType getType() const override { return ResourceType::CombinedImageSampler; }
+  ResourceType getType() const override {
+    return ResourceType::CombinedImageSampler;
+  }
   const void *getRawData() const override { return m_texture->data(); }
   u32 getByteSize() const override { return m_texture->size(); }
 
-  PipelineSlotId getPipelineSlotId() const override { return m_slotId; }
+  StringID getBindingName() const override { return m_bindingName; }
 
 private:
   TexturePtr m_texture;
-  PipelineSlotId m_slotId = PipelineSlotId::None;
+  StringID m_bindingName;
   ResourcePassFlag m_passFlag = ResourcePassFlag::Forward;
 };
 

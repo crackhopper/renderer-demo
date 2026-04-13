@@ -1,40 +1,32 @@
 #pragma once
 
-#include "core/resources/index_buffer.hpp"
-#include "core/resources/vertex_buffer.hpp"
 #include "vkp_pipeline.hpp"
 #include <string>
-#include <vector>
 
 namespace LX_core::backend {
 
-/// File-based graphics pipeline with explicit vertex layout, topology, and slot
-/// table (replaces shader-specific subclasses such as Blinn-Phong).
+/// Data-driven graphics pipeline built end-to-end from a `PipelineBuildInfo`.
+/// Retains a metadata shader name purely for diagnostics.
 class VulkanShaderGraphicsPipeline : public VulkanPipeline {
 public:
   using VulkanPipeline::VulkanPipeline;
 
-  static VulkanPipelinePtr
-  create(VulkanDevice &device, VkExtent2D extent, std::string shaderBaseName,
-         VertexLayout vertexLayout, std::vector<PipelineSlotDetails> slots,
-         PushConstantDetails pushConstants, PrimitiveTopology topology);
+  /// Build a fully-constructed pipeline: shader modules, descriptor set
+  /// layouts, pipeline layout, and VkPipeline all in one call.
+  static VulkanPipelinePtr create(VulkanDevice &device,
+                                  const PipelineBuildInfo &buildInfo,
+                                  VkRenderPass renderPass,
+                                  std::string shaderName = {});
 
-  const VertexLayout &referenceVertexLayout() const override;
-  std::string getShaderName() const override;
-  std::string getPipelineId() const override;
-
-  VkPipelineInputAssemblyStateCreateInfo getInputAssemblyStateCreateInfo() override;
+  std::string getPipelineId() const override { return m_shaderName; }
+  std::string getShaderName() const override { return m_shaderName; }
 
 private:
-  VulkanShaderGraphicsPipeline(Token t, VulkanDevice &device, VkExtent2D extent,
-                               std::string shaderBaseName, VertexLayout vertexLayout,
-                               std::vector<PipelineSlotDetails> slots,
-                               PushConstantDetails pushConstants,
-                               PrimitiveTopology topology);
+  VulkanShaderGraphicsPipeline(Token t, VulkanDevice &device,
+                               const PipelineBuildInfo &buildInfo,
+                               std::string shaderName);
 
-  std::string m_shaderBaseName;
-  VertexLayout m_vertexLayout;
-  VkPrimitiveTopology m_vkTopology;
+  std::string m_shaderName;
 };
 
 } // namespace LX_core::backend

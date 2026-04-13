@@ -71,8 +71,9 @@ struct alignas(16) SkeletonUBO : public IRenderResource {
   static constexpr u32 ResourceSize = MAX_BONE_COUNT * sizeof(Mat4f);
   const void *getRawData() const override { return m_bones; }
   u32 getByteSize() const override { return ResourceSize; }
-  PipelineSlotId getPipelineSlotId() const override {
-    return PipelineSlotId::SkeletonUBO;
+  StringID getBindingName() const override {
+    static const StringID kName("Bones");
+    return kName;
   }
 
 private:
