@@ -150,12 +150,16 @@ The VulkanCommandBuffer SHALL support:
 - Setting scissor to framebuffer dimensions
 - Binding graphics pipeline
 - Binding vertex and index buffers
-- Binding descriptor sets for all pipeline slots
+- Binding descriptor sets by matching each descriptor binding from the pipeline's reflected `ShaderResourceBinding` list against the `RenderingItem::descriptorResources` via `IRenderResource::getBindingName()`. The matching SHALL NOT use `PipelineSlotId`; that enum SHALL not exist.
 - Drawing indexed primitives with push constants
 
 #### Scenario: Recording triangle draw commands
 - **WHEN** Recording commands for triangle rendering
 - **THEN** Command buffer SHALL have: beginRenderPass, setViewport, setScissor, bindPipeline, bindVertexBuffer, bindIndexBuffer, drawIndexed
+
+#### Scenario: Recording a draw binds descriptors by name
+- **WHEN** Recording commands for a `RenderingItem` whose pipeline exposes a `"CameraUBO"` binding at set 1 binding 0 and whose `descriptorResources` contains a resource whose `getBindingName()` returns `StringID("CameraUBO")`
+- **THEN** The command buffer updates the descriptor set at `(set=1, binding=0)` to reference that resource's GPU buffer, with no lookup table from a hardcoded enum
 
 ### Requirement: VulkanPipeline shall create graphics pipelines with shader stages
 
@@ -196,16 +200,16 @@ The VulkanResourceManager SHALL support:
 - Creating VulkanTexture from IRenderResource with type CombinedImageSampler
 - Maintaining map of IRenderResource* to created Vulkan objects
 - Initializing render pass with correct formats
-- Maintaining a cache of graphics `VulkanPipeline` instances keyed by `LX_core::PipelineKey` (using `PipelineKey::Hash`), creating and storing a pipeline on cache miss from the current draw’s shader and layout data, with no requirement for a fixed built-in pipeline name such as `blinnphong_0`
+- Delegating pipeline caching to a standalone `LX_core::backend::PipelineCache` instance (see the `pipeline-cache` capability). The resource manager SHALL NOT store the pipeline map directly; the legacy `getOrCreateRenderPipeline(item)` helper, if retained, SHALL be a thin forward to `PipelineCache::getOrCreate(PipelineBuildInfo::fromRenderingItem(item), renderPass)`
 
 #### Scenario: Resource mapping for vertex buffer
 - **WHEN** initScene creates GPU resource for vertex buffer IRenderResource
 - **THEN** VulkanResourceManager SHALL store mapping and return valid VulkanBuffer
 
-#### Scenario: Pipeline lookup by PipelineKey
+#### Scenario: Pipeline lookup delegates to PipelineCache
 
-- **WHEN** draw logic requests the pipeline for a `PipelineKey` already present in the cache
-- **THEN** VulkanResourceManager SHALL return the existing `VulkanPipeline` without creating a duplicate
+- **WHEN** draw logic requests a pipeline for a `PipelineKey` present in the cache
+- **THEN** the request resolves via `PipelineCache::find` and no code path references `VulkanResourceManager::m_pipelines` (which SHALL not exist after this change)
 
 ### Requirement: Integration tests shall verify each module independently
 

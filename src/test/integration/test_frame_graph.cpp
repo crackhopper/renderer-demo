@@ -74,7 +74,6 @@ public:
   ResourcePassFlag getPassFlag() const override {
     return ResourcePassFlag::Forward;
   }
-  ShaderProgramSet getShaderProgramSet() const override { return {}; }
   RenderState getRenderState() const override { return {}; }
 
   StringID getRenderSignature(StringID pass) const override {

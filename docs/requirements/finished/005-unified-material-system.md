@@ -318,4 +318,27 @@ MaterialInstance::Ptr loadBlinnPhongMaterial() {
 
 ## 实施状态
 
-未开始。
+已完成（2026-04-13）— 通过 `/finish-req 005` 验证。
+
+**验证结果**：R1–R11 全部 ✓ Implemented（随 REQ-004/REQ-007/REQ-003b 链路陆续在之前的 session 里落地）
+
+- **R1 — `IMaterial` 接口收敛**：`src/core/resources/material.hpp:157`。REQ-007 后额外增加了一个 `getRenderSignature(pass)` pure virtual（前向兼容扩展）。
+- **R2 — `MaterialTemplate::create(name, shader)` 必传 shader**：`material.hpp:185`；单一 `m_bindingCache`，无 `m_passHashCache`。REQ-007 把 `m_passes` 键从 `std::string` 迁到 `StringID`（有意 drift，下游需要）。
+- **R3 — `MaterialInstance : public IMaterial`**：5 个 setter + `setTexture(StringID, CombinedTextureSamplerPtr)` 单一重载；无 `m_vec4s/m_floats` 冗余 map。
+- **R4 — UBO 自动初始化**：构造函数按反射 `type == UniformBuffer && name == "MaterialUBO"` 定位，分配 `m_uboBuffer`，并建立稳定的 `UboByteBufferResource` wrapper。
+- **R5 — `writeUboMember` 统一 std140 写入**：`setVec4/Vec3/Float/Int` 全部薄壳委托；`setVec3` 正确只写 12 字节（规避 16 字节 bucket 污染下一字段）。
+- **R6 — `setTexture` 走 `findBinding(id)`**：包含 `Texture2D/TextureCube` 类型断言。
+- **R7 — `getDescriptorResources`**：UBO + 纹理按 `(set<<16)|binding` 排序返回；同时在 REQ-003b 落地时补充 `tex->setBindingName(id)`，方便 backend 按反射 binding name 路由。
+- **R8 — `updateUBO`**：dirty flag + `m_uboResource->setDirty()` 流程。
+- **R9 — 删除 `DrawMaterial` / `BlinnPhongMaterialUBO`**：`grep -rn "DrawMaterial\|BlinnPhongMaterialUBO" src/` 只剩两处历史注释，实体已删。
+- **R10 — `blinnphong_material_loader`** 返回 `MaterialInstance::Ptr`，seeds `baseColor/shininess/specularIntensity/enableAlbedo/enableNormal` 默认值。
+- **R11 — 调用点迁移**：`RenderableSubMesh::material` 仍是 `MaterialPtr`，运行期指向 `MaterialInstance`；所有测试的 `DrawMaterial` 构造早已替换。
+- **测试**：`src/test/integration/test_material_instance.cpp` 6 个子用例覆盖 UBO buffer 大小、setVec3 12B 边界、setFloat/setInt offset、`getDescriptorResources` 稳定身份、loader 产出有效实例。
+
+**简化**：移除 `IMaterial::getShaderProgramSet()` 纯虚函数及其 4 处实现/override（`MaterialInstance` + `test_pipeline_build_info` / `test_pipeline_identity` / `test_frame_graph` 的 FakeMaterial）。该方法在生产代码无任何调用点，仅因 pure virtual 强制所有具现提供空/转发 override——死 API。`getRenderState()` 保留（`pipeline_build_info.cpp` 消费）。
+
+**测试结果**：
+- `test_material_instance` — PASS（6/6 子用例）
+- `test_shader_compiler` — PASS（REQ-004 的 UBO members 断言保持绿）
+- `test_string_table` / `test_pipeline_identity` / `test_pipeline_build_info` / `test_frame_graph` — 全部 PASS
+- 全量 `cmake --build ./build` — 0 warning / 0 error

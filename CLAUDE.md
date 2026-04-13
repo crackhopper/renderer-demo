@@ -20,6 +20,10 @@ See `AGENTS.md` for full project context, architecture, and coding standards.
 - `openspec/specs/texture-loading/spec.md` — Image loading (stb_image)
 - `openspec/specs/mesh-loading/spec.md` — OBJ/GLTF mesh loading
 - `openspec/specs/render-signature/spec.md` — `getRenderSignature(pass)` across resources; `Pass_*` constants
+- `openspec/specs/pipeline-key/spec.md` — `PipelineKey::build(objSig, matSig)` structured identity
+- `openspec/specs/pipeline-build-info/spec.md` — `PipelineBuildInfo` aggregation of pipeline construction inputs
+- `openspec/specs/frame-graph/spec.md` — `FrameGraph` / `RenderQueue` / `RenderTarget` / `ImageFormat`
+- `openspec/specs/pipeline-cache/spec.md` — Backend pipeline cache: `find` / `getOrCreate` / `preload`
 - `openspec/specs/skeleton-resource/spec.md` — Skeleton as core resource, no `IComponent`
 
 ## Design Docs Index

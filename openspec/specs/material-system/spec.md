@@ -8,7 +8,7 @@ The system SHALL provide exactly one concrete implementation of `IMaterial`, nam
 - **THEN** the returned `MaterialPtr` points to a `MaterialInstance` and the concrete type `DrawMaterial` is not referenced anywhere in `src/`
 
 #### Scenario: IMaterial virtual surface is preserved
-- **WHEN** rendering code calls `getShaderInfo()`, `getPassFlag()`, `getShaderProgramSet()`, `getRenderState()`, or `getDescriptorResources()` on a `MaterialInstance`
+- **WHEN** rendering code calls `getShaderInfo()`, `getPassFlag()`, `getRenderState()`, `getDescriptorResources()`, or `getRenderSignature(pass)` on a `MaterialInstance`
 - **THEN** each call returns a value consistent with the `MaterialTemplate`'s configuration and the instance's per-object state
 
 ### Requirement: MaterialTemplate requires a shader at construction

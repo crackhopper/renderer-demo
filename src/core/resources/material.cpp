@@ -144,11 +144,6 @@ IShaderPtr MaterialInstance::getShaderInfo() const {
   return m_template ? m_template->getShader() : nullptr;
 }
 
-ShaderProgramSet MaterialInstance::getShaderProgramSet() const {
-  const auto *entry = m_template ? firstEntry(*m_template) : nullptr;
-  return entry ? entry->shaderSet : ShaderProgramSet{};
-}
-
 RenderState MaterialInstance::getRenderState() const {
   const auto *entry = m_template ? firstEntry(*m_template) : nullptr;
   return entry ? entry->renderState : RenderState{};

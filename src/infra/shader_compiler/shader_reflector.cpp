@@ -80,12 +80,8 @@ mapSpvType(const spirv_cross::Compiler &compiler,
   auto &type = compiler.get_type(res.type_id);
 
   if (storageClass == spv::StorageClassUniform) {
-    // Buffer type (struct) vs plain uniform
+    // Struct under Uniform storage class = UBO block; plain uniforms fall through.
     if (type.basetype == spirv_cross::SPIRType::Struct) {
-      auto bufferFlags =
-          compiler.get_buffer_block_flags(res.id);
-      // storage buffer has BufferBlock decoration in GLSL 450
-      // For uniform blocks this returns the block decorations
       return LX_core::ShaderPropertyType::UniformBuffer;
     }
   }

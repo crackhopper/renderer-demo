@@ -160,7 +160,6 @@ public:
   virtual std::vector<IRenderResourcePtr> getDescriptorResources() const = 0;
   virtual IShaderPtr getShaderInfo() const = 0;
   virtual ResourcePassFlag getPassFlag() const = 0;
-  virtual ShaderProgramSet getShaderProgramSet() const = 0;
   virtual RenderState getRenderState() const = 0;
 
   /// Structured per-pass signature used to build PipelineKey via
@@ -296,7 +295,6 @@ public:
   std::vector<IRenderResourcePtr> getDescriptorResources() const override;
   IShaderPtr getShaderInfo() const override;
   ResourcePassFlag getPassFlag() const override { return m_passFlag; }
-  ShaderProgramSet getShaderProgramSet() const override;
   RenderState getRenderState() const override;
   StringID getRenderSignature(StringID pass) const override;
 

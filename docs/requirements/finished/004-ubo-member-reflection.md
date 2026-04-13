@@ -116,4 +116,18 @@ static void extractStructMembers(
 
 ## 实施状态
 
-未开始。
+已完成（2026-04-13）— 通过 `/finish-req 004` 验证。
+
+**验证结果**：R1–R6 全部 ✓ Implemented（实际在更早的 session 里随 REQ-005 一并落地）
+- R1 — `StructMemberInfo` + `ShaderPropertyType::Int` 位于 `src/core/resources/shader.hpp`
+- R2 — `ShaderResourceBinding::members` 字段同文件
+- R3 — `extractStructMembers` + `mapMemberType` + `extractBindings` hook 位于 `src/infra/shader_compiler/shader_reflector.cpp`
+- R4 — `reflect()` 跨 stage 合并逻辑保留 members，调试断言同步 name/type/offset/size
+- R5 — 成员顺序按 spirv-cross 声明顺序；最终结果按 `(set, binding)` 排序，成员顺序不变
+- R6 — `src/test/integration/test_shader_compiler.cpp` 的 `MaterialUBO members` 测试用例覆盖：`baseColor Vec3@0 size=12`、`shininess Float@12 size=4`、`enableAlbedo/Normal Int`；`members.size() == 6`
+
+**简化**：移除 `mapSpvType` 中死读的 `bufferFlags` 局部变量（存储/uniform 区分已由上层通过独立的 `resources.uniform_buffers` / `resources.storage_buffers` 列表完成）
+
+**测试结果**：
+- `test_shader_compiler` — PASS（所有子测试通过，`MaterialUBO members` 断言通过）
+- `test_string_table` / `test_pipeline_identity` / `test_pipeline_build_info` / `test_frame_graph` / `test_material_instance` — 全部 PASS（回归无影响）
