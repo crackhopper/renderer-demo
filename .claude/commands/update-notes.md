@@ -16,6 +16,8 @@ tags: [docs, notes, sync, onboarding]
 
 **IMPORTANT**: 这个命令的目标是产生**摘要与导航**，不是把 `openspec/specs/` 的内容复制一份。notes 的读者是第一次看这个项目的人，要帮他们快速建立心智模型并指向权威文档。
 
+**当前实现即真相**：notes 永远只描述**此刻代码库里真正存在的东西**。已删除的类、改名的接口、被废弃的设计、"曾经的 X" / "已废弃的 Y" / "历史 banner" —— 一律**物理删除**，不留 tombstone。历史留给 git log / `openspec/changes/archive/`，不留在 notes 里。
+
 ---
 
 ## Steps
@@ -247,12 +249,18 @@ Scene::buildRenderingItem(pass) → RenderingItem → VulkanResourceManager::get
 3. 决定改写策略：
    - **核心抽象变了**（类名、接口签名）→ 重写"核心抽象"小节
    - **调用关系变了**（新的 loader / 新的消费者）→ 重写"调用关系"
-   - **归档变更说明涉及它** → 在"注意事项"里追加一条摘要 + 链接
+   - **归档变更说明涉及它** → 把摘要融入相关小节（不是追加"注意事项"里的一条历史笔记）
    - **纯实现细节变化** → 不动
-4. 每次写之前用 `Read` 确认当前状态，避免把用户手写补充的内容覆盖掉
-5. **永远保留**以下人类手写痕迹：
+4. **废弃内容扫描**：对每个被改写的 notes 文件，额外做一遍 "当前实现对照"：
+   - 每个被 notes 提及的类名 / 函数名 / 文件路径，用 Grep 到 `src/` 验证它**此刻**是否存在
+   - 不存在的 → **物理删除**对应文字（包括链接、表格行、代码示例、"曾经 X / 已废弃 Y" banner）
+   - 存在但签名变了 → 改成当前签名
+   - 这一步的唯一目的：让 notes 的每一句话都能在代码里找到对应物。发现任何"残留痕迹 + 已废弃说明"都直接删掉 —— 不留 tombstone
+5. 每次写之前用 `Read` 确认当前状态，避免把用户手写补充的内容覆盖掉
+6. **永远保留**以下人类手写痕迹：
    - 被 `<!-- manual -->` / `<!-- manual:end -->` 包裹的段落
    - 非自动生成的二级标题（`## ` 开头且不在模板列表里的）
+   - 但**手写内容也要过 step 5.4 的废弃扫描**：若手写段落描述了已经不存在的类，停下报告给用户让他决定删除还是改写，**不**默认保留
 
 ### 6. 单子系统模式
 
@@ -284,7 +292,9 @@ Scene::buildRenderingItem(pass) → RenderingItem → VulkanResourceManager::get
 改写:    notes/subsystems/material-system.md
          notes/subsystems/shader-system.md
 新建:    notes/subsystems/geometry.md
-未动:    notes/README.md, notes/architecture.md, notes/glossary.md
+删除:    notes/subsystems/old-thing.md  (子系统已移除)
+废弃清理: notes/architecture.md — 删除对已删类 `XFoo` 的 3 处引用
+未动:    notes/README.md, notes/glossary.md
 
 未分类的变更（请考虑扩充映射表）:
 - src/backend/vulkan/details/commands/vkc_cmdbuffer.cpp
@@ -298,8 +308,9 @@ Scene::buildRenderingItem(pass) → RenderingItem → VulkanResourceManager::get
 
 - **中文写作**：与 `docs/design/` 的项目约定一致。代码符号保留英文原形。
 - **notes 是摘要不是复制**：spec 已经写完的内容不要重复——notes 写"是什么 + 在哪里 + 为什么"，详细"怎么工作"留给 spec 和 design doc 链接。
-- **永远不删除文件**：增量改写只更新内容；如果一个子系统被彻底移除，在对应 notes 页顶部加"已废弃"横幅而不是 rm。
-- **保护手写内容**：`<!-- manual -->` 到 `<!-- manual:end -->` 之间的文本禁止触碰。模板之外的小节当做手写处理。
+- **当前实现即真相（核心守则）**：notes 永远只写**现在真实存在的东西**。发现 notes 里提到已删除的类、改名的接口、被废弃的设计 → **直接删除相关段落**，不留历史横幅、不写"曾经的 X"、不加"已废弃"banner。历史信息归 git log / `openspec/changes/archive/`。
+- **子系统消失时删除 notes 文件**：若某个子系统被整个移除（所有 `src/` 入口都消失），对应 `notes/subsystems/<name>.md` **也应该** `rm` 掉，并从 `notes/README.md` / `notes/.sync-meta.json` / `mkdocs.yml` 里移除引用。summary 段报告为 "删除: ..."，不留 tombstone 文件。
+- **保护手写内容**：`<!-- manual -->` 到 `<!-- manual:end -->` 之间的文本禁止被自动改写。但若手写内容**本身描述的东西已经不存在**（例如一个已删除的类），停下告诉用户，让用户决定删除还是改写 — 不要默认保留。
 - **代码引用带行号**：`src/core/resources/material.hpp:101`（运行 Grep 获取准确行号，不要猜）。
 - **不读实现细节**：头文件里的类/接口签名就够了；实现细节留给读代码的人自己看。
 - **尊重同步状态**：如果 `notes/.sync-meta.json` 和 git 对不上（commit 找不到），**停下问用户**，不要自己回退到全量模式。

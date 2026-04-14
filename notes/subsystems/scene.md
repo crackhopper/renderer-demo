@@ -1,8 +1,8 @@
 # Scene
 
-> 场景层负责把可渲染对象（mesh + material + optional skeleton）组装成一帧要 submit 的 `RenderingItem`。`Scene::buildRenderingItem(pass)` 是整个引擎里唯一把"场景状态"转换为"draw call 数据"的入口。
+> 场景层是一个**纯数据容器**：持有可渲染对象集合（mesh + material + 可选 skeleton）、camera、directional light。`RenderingItem` 的构造不在 Scene，而在 `RenderQueue::buildFromScene(scene, pass)`——Scene 只提供 getter。
 >
-> 相关 spec: `openspec/specs/pipeline-key/spec.md` R3（`RenderingItem` 字段）、`openspec/specs/render-signature/spec.md` R7（pass 参数贯通）、`openspec/specs/frame-graph/spec.md`（Scene 扩展为多 renderable）
+> 相关 spec: `openspec/specs/pipeline-key/spec.md`（`RenderingItem` 字段）、`openspec/specs/render-signature/spec.md`（`getRenderSignature(pass)` 贯通）、`openspec/specs/frame-graph/spec.md`（`RenderQueue::buildFromScene` + `IRenderable::supportsPass` + `Scene::getSceneLevelResources()`）
 
 ## 核心抽象
 
@@ -16,7 +16,7 @@ struct RenderingItem {
     ObjectPCPtr                      objectInfo;           // push constant 源
     IRenderResourcePtr               vertexBuffer;
     IRenderResourcePtr               indexBuffer;
-    std::vector<IRenderResourcePtr>  descriptorResources;  // material + camera + light + skeleton 等
+    std::vector<IRenderResourcePtr>  descriptorResources;  // material + skeleton + camera + light
     ResourcePassFlag                 passMask;
     StringID                         pass;                 // 当前 pass 的 StringID
     PipelineKey                      pipelineKey;          // 身份
@@ -29,20 +29,23 @@ struct RenderingItem {
 ```cpp
 class Scene {
 public:
-    std::vector<IRenderablePtr>  m_renderables;
     CameraPtr                    camera;
     DirectionalLightPtr          directionalLight;
 
-    // 单 renderable 快捷路径（历史兼容 — 实际走 m_renderables[0]）
-    RenderingItem buildRenderingItem(StringID pass);
-
-    // FrameGraph 遍历走这个
-    RenderingItem buildRenderingItemForRenderable(
-        const IRenderablePtr &renderable, StringID pass) const;
-
+    void addRenderable(IRenderablePtr r);
     const std::vector<IRenderablePtr> &getRenderables() const;
+
+    /// 场景级 descriptor 资源（camera UBO + light UBO）。
+    /// RenderQueue::buildFromScene 在构造每个 RenderingItem 时合并到末尾，
+    /// 取代任何"backend 手工注入 camera/light UBO"的老路径。
+    std::vector<IRenderResourcePtr> getSceneLevelResources() const;
+
+private:
+    std::vector<IRenderablePtr>  m_renderables;
 };
 ```
+
+`Scene` 不再暴露任何 item factory 方法。`RenderingItem` 构造职责完整迁到 `RenderQueue`。
 
 ### `IRenderable` (`src/core/scene/object.hpp:50`)
 
@@ -55,9 +58,12 @@ public:
     virtual ResourcePassFlag getPassMask() const = 0;
     virtual IShaderPtr getShaderInfo() const = 0;
     virtual ObjectPCPtr getObjectInfo() const { return nullptr; }
-
-    // REQ-007 之后：pass-aware 签名
     virtual StringID getRenderSignature(StringID pass) const = 0;
+
+    /// 该 renderable 是否参与指定 pass。默认实现：
+    ///   (getPassMask() & passFlagFromStringID(pass)) != 0
+    /// RenderQueue::buildFromScene 用它过滤 per-pass 的 item 集合。
+    virtual bool supportsPass(StringID pass) const;
 };
 ```
 
@@ -66,13 +72,14 @@ public:
 ```cpp
 struct RenderableSubMesh : public IRenderable {
     MeshPtr                       mesh;
-    MaterialPtr                   material;        // 实际指向 MaterialInstance
+    MaterialPtr                   material;        // MaterialInstance
     std::optional<SkeletonPtr>    skeleton;
     ObjectPCPtr                   objectPC;
 
     // IRenderable 接口全部 override
     // getDescriptorResources 聚合 material 资源 + skeleton UBO（若有）
     // getRenderSignature 做 compose(ObjectRender, {meshSig, skelSig})
+    // supportsPass 使用默认实现（基于 material 的 passFlag）
 };
 ```
 
@@ -82,13 +89,31 @@ struct RenderableSubMesh : public IRenderable {
 - **`DirectionalLightUBO`** (`src/core/scene/light.hpp:8`) — dir / color
 - **`ObjectPC`** (`src/core/scene/object.hpp:15`) — push constant，128 字节缓冲，继承 `IRenderResource`
 
-这些由 `Scene` / `Camera` / `DirectionalLight` 持有，通过 `renderable->getDescriptorResources()` **不会**返回 —— scene UBO 由 `VulkanRenderer::initScene` 显式注入到 `RenderingItem::descriptorResources`。
+这些 UBO 由 `Scene` / `Camera` / `DirectionalLight` 持有。`Scene::getSceneLevelResources()` 返回 `{camera UBO, directional light UBO}`（顺序固定，非空 optional），`RenderQueue::buildFromScene` 自动合并到每个 `RenderingItem::descriptorResources` 末尾，backend 无需额外注入。
+
+### `RenderQueue::buildFromScene` (`src/core/scene/render_queue.hpp:34`)
+
+```cpp
+class RenderQueue {
+public:
+    /// 按 pass 从 scene 构建 queue 里所有 RenderingItem：
+    ///   1. clearItems()
+    ///   2. 拉取 scene.getSceneLevelResources() 一次
+    ///   3. 遍历 scene.getRenderables(), 跳过 !supportsPass(pass) 的
+    ///   4. 为每个匹配的 renderable 构造 RenderingItem (文件内 makeItemFromRenderable helper)
+    ///   5. 把 scene 级资源追加到 item.descriptorResources 末尾
+    ///   6. sort() 按 PipelineKey 稳定排序
+    void buildFromScene(const Scene &scene, StringID pass);
+};
+```
 
 ## 典型用法
 
 ```cpp
 #include "core/scene/scene.hpp"
 #include "core/scene/pass.hpp"
+#include "core/scene/render_queue.hpp"
+#include "core/scene/frame_graph.hpp"
 #include "core/scene/object.hpp"
 
 using namespace LX_core;
@@ -102,83 +127,89 @@ auto renderable = std::make_shared<RenderableSubMesh>(mesh, material, skeleton);
 // 2. 场景
 auto scene = Scene::create(renderable);
 
-// 3. 配置 camera / light (scene 构造时已创建)
+// 3. 配置 camera / light (Scene 构造时已创建)
 scene->camera->position = {0, 0, 3};
 scene->camera->target   = {0, 0, 0};
 scene->camera->up       = {0, 1, 0};
 scene->camera->updateMatrices();
 
-// 4. 产出一帧的 RenderingItem（单 pass 快捷路径）
-auto item = scene->buildRenderingItem(Pass_Forward);
-// item.pipelineKey 已填充
-// item.pass == Pass_Forward
-// item.descriptorResources 包含 material UBO + 可选 skeleton UBO
+// 4. 从 Scene 构建单 pass 的 RenderQueue
+RenderQueue queue;
+queue.buildFromScene(*scene, Pass_Forward);
+// queue.getItems() 已填满；每个 item.pipelineKey / item.pass 已填充，
+// descriptorResources 尾部已合并 camera UBO + light UBO
 
-// 5. 多 pass 走 FrameGraph
-auto frameGraph = std::make_shared<FrameGraph>();
-frameGraph->addPass({Pass_Forward, {}, {}});
-frameGraph->buildFromScene(*scene);
-// 每个 pass 的 queue 已填满
+// 5. 多 pass 走 FrameGraph（同样的入口，FrameGraph 内部调 queue.buildFromScene）
+FrameGraph frameGraph;
+frameGraph.addPass({Pass_Forward, {}, {}});
+frameGraph.buildFromScene(*scene);
+// 每个 FramePass 的 queue 已填满
 ```
 
 ## 调用关系
 
 ```
-Scene::buildRenderingItem(pass)
+VulkanRenderer::initScene(scene)
   │
-  ├── 从 m_renderables.front() 取 renderable
-  │   （或 buildRenderingItemForRenderable(renderable, pass) 逐个处理）
+  ├── m_frameGraph.addPass(FramePass{Pass_Forward, defaultForwardTarget(), {}})
   │
-  ├── 从 renderable 收集值字段:
-  │     item.vertexBuffer        = renderable->getVertexBuffer()
-  │     item.indexBuffer         = renderable->getIndexBuffer()
-  │     item.objectInfo          = renderable->getObjectInfo()
-  │     item.descriptorResources = renderable->getDescriptorResources()
-  │     item.shaderInfo          = renderable->getShaderInfo()
-  │     item.passMask            = renderable->getPassMask()
-  │     item.pass                = pass
+  ├── m_frameGraph.buildFromScene(*scene)
+  │     │
+  │     └── for each FramePass:
+  │           pass.queue.buildFromScene(scene, pass.name)
+  │             │
+  │             ├── clearItems()
+  │             ├── sceneResources = scene.getSceneLevelResources()   // camera + light UBO
+  │             │
+  │             ├── for each renderable in scene.getRenderables():
+  │             │     if (!renderable->supportsPass(pass)) continue;
+  │             │     item = makeItemFromRenderable(renderable, pass):
+  │             │         vertexBuffer / indexBuffer / objectInfo
+  │             │         descriptorResources = renderable->getDescriptorResources()
+  │             │         shaderInfo / passMask / pass = ...
+  │             │         if RenderableSubMesh + mesh + material:
+  │             │             item.material    = sub->material
+  │             │             item.pipelineKey = PipelineKey::build(
+  │             │                 sub->getRenderSignature(pass),
+  │             │                 sub->material->getRenderSignature(pass))
+  │             │     item.descriptorResources.insert(end, sceneResources)
+  │             │     m_items.push_back(item)
+  │             │
+  │             └── sort()   // 按 PipelineKey 稳定排序
   │
-  ├── 若 renderable 是 RenderableSubMesh 且 mesh + material 都有：
-  │     item.material    = sub->material
-  │     objectSig        = sub->getRenderSignature(pass)
-  │     materialSig      = sub->material->getRenderSignature(pass)
-  │     item.pipelineKey = PipelineKey::build(objectSig, materialSig)
-  │
-  └── 返回 item
+  └── preloadPipelines(m_frameGraph.collectAllPipelineBuildInfos())
 
-────── 后续 ──────
-
-VulkanRenderer::initScene(scene):
-  │ 把 scene->camera->getUBO() / scene->directionalLight->getUBO()
-  │ 注入到 RenderingItem::descriptorResources
-  │ (通过 render_queue / frame_graph 路径)
-
-VulkanCommandBuffer::bindResources(item, pipeline):
-  │ 对 pipeline 反射 binding 里每一条：
-  │   按 binding.name 在 item.descriptorResources 里找
-  │     IRenderResource::getBindingName() == StringID(binding.name) 的那个
-  │   更新 descriptor set
+VulkanRenderer::draw()
+  │
+  └── for each FramePass in m_frameGraph.getPasses():
+        for each item in pass.queue.getItems():
+          pipeline = resourceManager->getOrCreateRenderPipeline(item)
+          cmd->bindPipeline(pipeline)
+          cmd->bindResources(*resourceManager, pipeline, item)   // 按 binding.name 匹配
+          cmd->drawItem(item)
 ```
 
 ## 注意事项
 
-- **Scene 曾经只持有单个 renderable**: 老代码是 `IRenderablePtr mesh;`。REQ-003b 扩展成 `std::vector<IRenderablePtr> m_renderables`。单 renderable 的 constructor + `buildRenderingItem(pass)` 快捷路径保留，内部 `m_renderables.front()`。
-- **`RenderingItem::material` 是 REQ-003b 新增字段**: `PipelineBuildInfo::fromRenderingItem(item)` 需要从 material 派生 `renderState`，所以 item 要持 material 的 shared_ptr。老代码没这个字段。
-- **Scene UBO 不在 `getDescriptorResources()` 里**: `RenderableSubMesh::getDescriptorResources()` 只返回 material 资源和可选的 skeleton UBO；camera / light UBO 由 `VulkanRenderer::initScene` 在外部注入。这种"scene 级资源与 per-object 资源分开"的设计让 material 的资源列表保持纯粹。
+- **Scene 是纯数据容器**: 除了 setter/getter 和 `getSceneLevelResources()`，Scene 不暴露任何业务逻辑。item factory / pass 过滤 / 资源合并全部在 `RenderQueue::buildFromScene` 内完成。
+- **`RenderingItem::material` 字段用于 PipelineBuildInfo**: `PipelineBuildInfo::fromRenderingItem(item)` 需要从 material 派生 `renderState`，所以 item 持 material 的 shared_ptr。
+- **Scene UBO 不在 `IRenderable::getDescriptorResources()` 里**: `RenderableSubMesh::getDescriptorResources()` 只返回 material 资源和可选的 skeleton UBO。camera / light UBO 由 `Scene::getSceneLevelResources()` 单独暴露，`RenderQueue::buildFromScene` 合并到每个 item 末尾。这种分离让 material 的资源列表保持纯粹。
 - **Push constant 通过 `ObjectPC`**: `ObjectPC : IRenderResource` 存 128 字节的 model 矩阵 + flags。`RenderableSubMesh` 构造时创建一个，由 material 的 passFlag 决定它属于哪一 pass。
-- **Pass 参数贯穿**: 从 `Scene::buildRenderingItem(pass)` 开始，pass 穿过 `IRenderable::getRenderSignature(pass)` → `Mesh::getRenderSignature(pass)` → `IMaterial::getRenderSignature(pass)` → `MaterialTemplate::getRenderPassSignature(pass)`。任何一环如果弄丢 pass 参数都会导致 pipeline key 混乱。
+- **Pass 参数贯穿**: 从 `RenderQueue::buildFromScene(scene, pass)` 开始，pass 穿过 `IRenderable::getRenderSignature(pass)` → `Mesh::getRenderSignature(pass)` → `IMaterial::getRenderSignature(pass)` → `MaterialTemplate::getRenderPassSignature(pass)`。任何一环弄丢 pass 参数都会导致 pipeline key 混乱。
+- **`supportsPass` 默认实现**: `(getPassMask() & passFlagFromStringID(pass)) != 0`。`passFlagFromStringID` 在 `src/core/scene/pass.cpp` 里把 `Pass_Forward` / `Pass_Deferred` / `Pass_Shadow` 翻译成对应的 `ResourcePassFlag` 位；未知 pass 返回 0 位，被过滤掉。
 
 ## 测试
 
-- `src/test/integration/test_vulkan_command_buffer.cpp` — 端到端路径：构建 `RenderingItem` → bindResources → draw
-- `src/test/integration/test_pipeline_identity.cpp` — `Scene::buildRenderingItem` 的 pipelineKey 填充
-- `src/test/integration/test_frame_graph.cpp` — 多 renderable × 多 pass 扫描
+- `src/test/integration/test_vulkan_command_buffer.cpp` — 端到端路径：`firstItemFromScene` helper → bindResources → draw
+- `src/test/integration/test_pipeline_identity.cpp` — `RenderQueue::buildFromScene` 产出的 item 的 pipelineKey 填充
+- `src/test/integration/test_frame_graph.cpp` — 多 renderable × 多 pass 扫描、pass-mask 过滤、幂等重建
+- `src/test/integration/scene_test_helpers.hpp` — `firstItemFromScene(scene, pass)` 共享 helper，封装 `RenderQueue::buildFromScene` + `getItems().front()` + 非空断言
 
 ## 延伸阅读
 
+- `openspec/specs/frame-graph/spec.md` — `RenderQueue::buildFromScene` / `IRenderable::supportsPass` / `Scene::getSceneLevelResources` 契约
 - `openspec/specs/pipeline-key/spec.md` — `RenderingItem::pipelineKey + pass` 字段契约
-- `openspec/specs/render-signature/spec.md` R7 — `IRenderable::getRenderSignature(pass)` 要求
-- `openspec/specs/frame-graph/spec.md` — `Scene` 的 `getRenderables()` 扩展
+- `openspec/specs/render-signature/spec.md` — `IRenderable::getRenderSignature(pass)` 要求
+- `notes/subsystems/frame-graph.md` — FrameGraph / FramePass / RenderQueue 组合
 - `notes/subsystems/pipeline-identity.md` — `PipelineKey` 的构造
 - `notes/subsystems/material-system.md` — material 如何贡献 `materialSig`
-- 归档: `openspec/changes/archive/2026-04-10-pipeline-key-rendering-item/` — `RenderingItem` 首次引入 `pipelineKey` 字段

@@ -1,6 +1,6 @@
 # Renderer Demo — 项目速览
 
-> 一个基于 Vulkan 的 C++20 渲染器示例工程，用来演练完整的材质系统 / pipeline identity / scene graph / frame graph。本目录的文档由 `/update-notes` 自动生成增量维护，最后同步：commit `9a93dd2`（2026-04-13）。
+> 一个基于 Vulkan 的 C++20 渲染器示例工程，用来演练完整的材质系统 / pipeline identity / scene graph / frame graph。本目录的文档由 `/update-notes` 自动生成增量维护，最后同步：commit `0fe34a8`（2026-04-14）。
 
 ## 这是什么
 
@@ -71,19 +71,19 @@ Windows：使用 `scripts/build-project.ps1`，它会自动处理 `SHADERC_DIR` 
 - **归档变更**: `openspec/changes/archive/YYYY-MM-DD-<name>/`（每次落地的实施记录）
 - **这里（notes/）**: 摘要 + 导航，帮新人快速建立心智模型
 
-## 项目演化快照
+## 归档变更索引
 
-到 `9a93dd2` 为止，已归档的需求：
+每次落地的实施记录在 `openspec/changes/archive/` 下。按时间倒序：
 
-| REQ | 主题 | 归档变更 |
-|-----|------|---------|
-| 001 | Skeleton 迁移至 `core/resources/`，升级为独立资源管理器 | `2026-04-10-migrate-skeleton-to-resources` |
-| 002 | `PipelineKey` + `RenderingItem.pipelineKey` 字段 | `2026-04-10-pipeline-key-rendering-item` |
-| 003a | `getPipelineHash()` 约定 + 通用 pipeline 类 | （随 001/002 一并） |
-| 003b | Pipeline 预构建：`PipelineBuildInfo` / `PipelineCache` / `FrameGraph` / `ImageFormat` + `RenderTarget` | `2026-04-13-pipeline-prebuilding` |
-| 004 | SPIRV-Cross 反射扩展：抽取 UBO 成员（`StructMemberInfo`） | `2026-04-13-ubo-member-reflection` |
-| 005 | 统一材质：`MaterialInstance` 取代 `DrawMaterial`，反射驱动 UBO | `2026-04-13-unify-material-system` |
-| 006 | `GlobalStringTable` 结构化 `compose` / `decompose` / `TypeTag` | `2026-04-13-extend-string-table-compose` |
-| 007 | Pipeline identity 从 `getPipelineHash()→size_t` 迁移到 `getRenderSignature(pass)→StringID` | `2026-04-13-interning-pipeline-identity` |
+| 归档 | 主题 |
+|------|------|
+| `2026-04-14-frame-graph-drives-rendering` | `FrameGraph` 真正驱动 backend 渲染路径：`VulkanRenderer` 持 `m_frameGraph`，`RenderQueue::buildFromScene` 接管 `RenderingItem` 构造 + `Scene::getSceneLevelResources` 合并 + `IRenderable::supportsPass` 过滤 |
+| `2026-04-13-interning-pipeline-identity` | Pipeline identity 基于 `getRenderSignature(pass) → StringID` 结构化 intern |
+| `2026-04-13-unify-material-system` | `MaterialInstance` 作为唯一 `IMaterial` 实现，基于 shader 反射驱动 UBO |
+| `2026-04-13-ubo-member-reflection` | SPIRV-Cross 反射扩展：抽取 UBO 成员（`StructMemberInfo`） |
+| `2026-04-13-pipeline-prebuilding` | `PipelineBuildInfo` / `PipelineCache` / `FrameGraph` / `ImageFormat` + `RenderTarget` 基础设施 |
+| `2026-04-13-extend-string-table-compose` | `GlobalStringTable` 结构化 `compose` / `decompose` / `TypeTag` |
+| `2026-04-10-pipeline-key-rendering-item` | `PipelineKey` + `RenderingItem.pipelineKey` 字段 |
+| `2026-04-10-migrate-skeleton-to-resources` | Skeleton 作为独立资源管理器迁到 `core/resources/` |
 
 下一批计划中的工作见 `docs/requirements/*.md` 顶层（未归档）。

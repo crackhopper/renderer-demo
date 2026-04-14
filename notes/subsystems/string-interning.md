@@ -54,15 +54,20 @@ std::cout << tbl.toDebugString(pipelineId) << '\n';
 
 ```cpp
 #include "core/scene/pass.hpp"
+#include "core/scene/render_queue.hpp"
 
-auto item = scene->buildRenderingItem(LX_core::Pass_Forward);
+LX_core::RenderQueue q;
+q.buildFromScene(*scene, LX_core::Pass_Forward);
+auto &item = q.getItems().front();
 // Pass_Forward 是 inline const StringID("Forward")
+// item.pipelineKey 已通过结构化 compose 得到
 ```
 
 ## 调用关系
 
 ```
-Scene::buildRenderingItem(pass)
+RenderQueue::buildFromScene(scene, pass)
+  │ (per renderable, inside makeItemFromRenderable helper)
   │
   ├── 调用 IRenderable::getRenderSignature(pass)
   │     └── Mesh::getRenderSignature(pass) → compose(MeshRender, {layoutSig, topologySig})
@@ -82,7 +87,6 @@ Scene::buildRenderingItem(pass)
 - **`Pass_Forward` 用 `inline const StringID` 而不是 `constexpr`**: `StringID` 的构造 intern 到全局表，有 side effect，不能 `constexpr`。
 - **Compose 是顺序敏感的**: `compose(tag, [a, b]) ≠ compose(tag, [b, a])`。需要稳定顺序的地方（例如 shader variants）必须先 sort 再 compose。
 - **叶子字符串不走 compose**: 比如 `topologySignature(TriangleList)` 直接返回 `Intern("tri")`，不要错写成 `compose(TypeTag::Topology, {})`（`TypeTag` 枚举里也故意没有 `Topology`）。
-- **REQ-007 之前 vs 之后**: 之前 pipeline 身份通过 `getPipelineHash() → size_t` 的混 hash 通道；之后全面迁移到 `getRenderSignature(pass) → StringID`。查代码看到 `getPipelineHash()` 遗留只是过渡期产物，都应该视为等价已废弃。
 
 ## 延伸阅读
 

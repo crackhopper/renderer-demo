@@ -60,41 +60,64 @@ GPU 同步通过"dirty 标志 + ResourceManager 同步"：
 
 ## 一帧的数据流
 
+`VulkanRenderer::Impl` 持有一个 `FrameGraph m_frameGraph` 成员，生命周期和 scene 绑定。数据流是**单向**的：Scene → FrameGraph → 每个 FramePass 的 RenderQueue → 每个 RenderingItem → backend 绘制。
+
 ```
-Scene 持有多个 IRenderable
-  │
-  │ for each pass (Pass_Forward / Pass_Shadow / ...)
-  ▼
-Scene::buildRenderingItem(pass)          src/core/scene/scene.cpp
-  │
-  │ 收集: vertexBuffer / indexBuffer / descriptorResources / passMask
-  │ 计算: PipelineKey::build(objectSig, materialSig)
-  ▼
-RenderingItem { pipelineKey, pass, material, descriptorResources, ... }
+Scene 持有:
+  - std::vector<IRenderablePtr> m_renderables
+  - CameraPtr camera
+  - DirectionalLightPtr directionalLight
+  - (getter) getSceneLevelResources() → {camera UBO, light UBO}
   │
   ▼
-FrameGraph::buildFromScene(scene)         src/core/scene/frame_graph.cpp
-  │ (预构建期)
-  │ 收集所有 pass × renderable → 每个 pass 的 RenderQueue
+VulkanRenderer::initScene(scene)                 src/backend/vulkan/vk_renderer.cpp
+  │
+  │ m_frameGraph.addPass(FramePass{Pass_Forward, target, {}})
+  │ m_frameGraph.buildFromScene(*scene)
+  ▼
+FrameGraph::buildFromScene(scene)                src/core/scene/frame_graph.cpp
+  │ for each FramePass in m_passes:
+  │   pass.queue.buildFromScene(scene, pass.name)
+  ▼
+RenderQueue::buildFromScene(scene, pass)         src/core/scene/render_queue.cpp
+  │ clearItems()
+  │ sceneResources = scene.getSceneLevelResources()   // camera + light UBO
+  │
+  │ for each renderable in scene.getRenderables():
+  │   if (!renderable->supportsPass(pass)) continue;
+  │   item = makeItemFromRenderable(renderable, pass)
+  │     vertexBuffer / indexBuffer / objectInfo / shaderInfo / passMask / pass
+  │     if (RenderableSubMesh && mesh && material):
+  │       item.pipelineKey = PipelineKey::build(
+  │           sub->getRenderSignature(pass),
+  │           sub->material->getRenderSignature(pass))
+  │   item.descriptorResources += sceneResources     // 末尾追加
+  │   m_items.push_back(item)
+  │ sort()   // 按 PipelineKey 稳定排序
   ▼
 FrameGraph::collectAllPipelineBuildInfos()
   │ PipelineBuildInfo::fromRenderingItem(item) × N
-  │ 去重 by PipelineKey
+  │ 跨 queue 按 PipelineKey 去重
   ▼
 PipelineCache::preload(buildInfos, renderPass)   src/backend/vulkan/details/pipelines/
   │ 为每个 PipelineBuildInfo 构建 VulkanPipeline 并缓存
-  ▼
-(运行期) for each RenderingItem:
-  │
-  ▼
-VulkanResourceManager::syncResource(...)         src/backend/vulkan/details/vk_resource_manager.cpp
-  │ 把 dirty 的 CPU 资源推到 GPU
-  ▼
-VulkanCommandBuffer::bindResources(item, pipeline)   src/backend/vulkan/details/commands/vkc_cmdbuffer.cpp
-  │ 按 IRenderResource::getBindingName() 匹配反射 binding
-  │ 更新 descriptor set
-  ▼
-VulkanCommandBuffer::drawItem(item)
+
+─────── 每帧运行期 ───────
+
+VulkanRenderer::uploadData()
+  │ for each pass in m_frameGraph.getPasses():
+  │   for each item in pass.queue.getItems():
+  │     syncResource(vertexBuffer / indexBuffer / descriptorResources)
+  │     (dirty 的资源会被推到 GPU)
+
+VulkanRenderer::draw()
+  │ for each pass in m_frameGraph.getPasses():
+  │   for each item in pass.queue.getItems():
+  │     pipeline = resourceManager.getOrCreateRenderPipeline(item)  // cache 命中
+  │     cmd->bindPipeline(pipeline)
+  │     cmd->bindResources(resourceManager, pipeline, item)
+  │       按 IRenderResource::getBindingName() 匹配反射 binding
+  │     cmd->drawItem(item)
 ```
 
 ## 核心接口层（src/core/gpu/）

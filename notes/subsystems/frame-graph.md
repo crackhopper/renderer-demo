@@ -1,6 +1,6 @@
 # Frame Graph
 
-> 一帧的渲染结构：若干 `FramePass` 组成，每个 pass 有自己的 `RenderQueue`。`FrameGraph` 的首要用途是 pipeline 预构建——在场景加载时一次性扫描所有 pass × renderable，推导出完整的 `PipelineBuildInfo` 集合，喂给 `PipelineCache::preload()`。
+> 一帧的渲染结构：若干 `FramePass` 组成，每个 pass 有自己的 `RenderQueue`。`FrameGraph` 由 `VulkanRenderer::Impl` 持有（成员 `m_frameGraph`），生命周期与 scene 绑定。它既是 pipeline 预构建的扫描入口，也是 draw loop 的遍历入口——backend 在每帧 `draw()` 里直接 `for pass in getPasses() × item in pass.queue.getItems()`。
 >
 > 权威 spec: `openspec/specs/frame-graph/spec.md`
 
@@ -16,7 +16,7 @@ struct FramePass {
 };
 ```
 
-`name` 是 `StringID`（不是 `std::string`）—— 对齐 `Scene::buildRenderingItem(StringID pass)` 的参数类型。
+`name` 是 `StringID`，对齐 `RenderQueue::buildFromScene(scene, pass)` 和 `IRenderable::supportsPass(pass)` 的参数类型。
 
 ### `FrameGraph` (`src/core/scene/frame_graph.hpp:22`)
 
@@ -27,10 +27,11 @@ public:
     void buildFromScene(const Scene &scene);
     std::vector<PipelineBuildInfo> collectAllPipelineBuildInfos() const;
     const std::vector<FramePass> &getPasses() const;
+    std::vector<FramePass> &getPasses();
 };
 ```
 
-- `buildFromScene`: 遍历每个 pass × 每个 renderable，产出 `RenderingItem` 推入对应 pass 的 queue
+- `buildFromScene`: 委托给每个 pass 的 `queue.buildFromScene(scene, pass.name)`。FrameGraph 本身不构造 `RenderingItem`。
 - `collectAllPipelineBuildInfos`: 汇总所有 queue 的 unique `PipelineBuildInfo`，按 `PipelineKey` 全局去重
 
 ### `RenderQueue` (`src/core/scene/render_queue.hpp:12`)
@@ -39,11 +40,18 @@ public:
 class RenderQueue {
 public:
     void addItem(RenderingItem item);
-    void sort();                                 // 按 PipelineKey 排序减少 pipeline 切换
+    void clearItems();
+    void sort();                                 // 按 PipelineKey 稳定排序
     const std::vector<RenderingItem> &getItems() const;
     std::vector<PipelineBuildInfo> collectUniquePipelineBuildInfos() const;
+
+    /// 从 scene 构建 queue：clearItems → 过滤 supportsPass → 构造 item
+    /// → 合并 scene.getSceneLevelResources() → sort。
+    void buildFromScene(const Scene &scene, StringID pass);
 };
 ```
+
+`RenderQueue::buildFromScene` 是 **唯一** 的 `RenderingItem` 构造入口。`Scene` 不再提供 item factory 方法。
 
 ### `ImageFormat` + `RenderTarget` (`src/core/gpu/`)
 
@@ -62,85 +70,96 @@ Core 层**不**引用 `VkFormat`。Backend（`src/backend/vulkan/details/`）提
 using namespace LX_core;
 
 auto scene = Scene::create(renderable);
-auto frameGraph = std::make_shared<FrameGraph>();
 
-// 配置 pass（只有 Forward 时）
-FramePass forward{
-    .name   = Pass_Forward,
-    .target = RenderTarget{ImageFormat::BGRA8, ImageFormat::D32Float, 1},
-    .queue  = {},
-};
-frameGraph->addPass(std::move(forward));
+FrameGraph frameGraph;
+frameGraph.addPass(FramePass{
+    Pass_Forward,
+    RenderTarget{ImageFormat::BGRA8, ImageFormat::D32Float, 1},
+    {}
+});
 
-// 从 Scene 填充每个 pass 的 queue
-frameGraph->buildFromScene(*scene);
+// 一次调用填满所有 pass 的 queue
+frameGraph.buildFromScene(*scene);
 
-// 收集所有去重后的 PipelineBuildInfo
-auto buildInfos = frameGraph->collectAllPipelineBuildInfos();
+// 汇总所有去重后的 PipelineBuildInfo 交给 backend preload
+auto buildInfos = frameGraph.collectAllPipelineBuildInfos();
+pipelineCache.preload(buildInfos, renderPassHandle);
 
-// 喂给 backend 的 preload
-vulkanPipelineCache.preload(buildInfos, renderPassHandle);
+// 每帧绘制时直接遍历
+for (auto &pass : frameGraph.getPasses()) {
+    for (auto &item : pass.queue.getItems()) {
+        auto &pipeline = resourceManager.getOrCreateRenderPipeline(item);
+        cmd->bindPipeline(pipeline);
+        cmd->bindResources(resourceManager, pipeline, item);
+        cmd->drawItem(item);
+    }
+}
 ```
 
 ## 调用关系
 
 ```
-scene load / scene change
+VulkanRenderer::initScene(scene)
+  │
+  ├── m_frameGraph.addPass(FramePass{Pass_Forward, defaultForwardTarget(), {}})
   │
   ▼
 FrameGraph::buildFromScene(scene)
-  │
   │ for each pass in m_passes:
-  │   for each renderable in scene.getRenderables():
-  │     item = Scene::buildRenderingItemForRenderable(renderable, pass.name)
-  │     pass.queue.addItem(std::move(item))
+  │   pass.queue.buildFromScene(scene, pass.name)
+  │     │
+  │     ├── clearItems()
+  │     ├── sceneResources = scene.getSceneLevelResources()   // camera UBO + light UBO
+  │     │
+  │     ├── for each renderable in scene.getRenderables():
+  │     │     if (!renderable->supportsPass(pass)) continue;
+  │     │     item = makeItemFromRenderable(renderable, pass)
+  │     │     item.descriptorResources += sceneResources   // 末尾追加
+  │     │     m_items.push_back(item)
+  │     │
+  │     └── sort()   // 按 PipelineKey 稳定
   │
   ▼
 FrameGraph::collectAllPipelineBuildInfos()
-  │
-  │ 对每个 pass：
-  │   queue.collectUniquePipelineBuildInfos()   // 本 queue 内按 key 去重
+  │ 对每个 pass：queue.collectUniquePipelineBuildInfos() // 本 queue 内按 key 去重
   │ 全局再按 key 去重一次
   │
   ▼
-Backend 收到 vector<PipelineBuildInfo>
-  │
-  ▼
 PipelineCache::preload(buildInfos, renderPass)
-  │ for each info:
-  │   PipelineCache::getOrCreate(info, renderPass)  // 但不报 miss warning
+
+─────── 每帧运行期 ───────
+
+VulkanRenderer::draw()
   │
-  ▼
-所有 pipeline 就绪
-
-─────── 运行期 ───────
-
-for each FramePass in frameGraph:
-    beginRenderPass(pass.target)
-    queue.sort()  // 减少 pipeline 切换
-    for each RenderingItem in queue.getItems():
-        pipeline = cache.find(item.pipelineKey)  // O(1)，应命中
-        cmd->bindPipeline(pipeline)
-        cmd->bindResources(item)
-        cmd->draw(item)
+  └── for each FramePass in m_frameGraph.getPasses():
+        for each RenderingItem in pass.queue.getItems():
+          pipeline = resourceManager.getOrCreateRenderPipeline(item)  // 预构建命中
+          cmd->bindPipeline(pipeline)
+          cmd->bindResources(resourceManager, pipeline, item)
+          cmd->drawItem(item)
 ```
 
 ## 注意事项
 
-- **Scene 接口已扩展**: 老版 `Scene` 只持有单个 `IRenderablePtr mesh`。REQ-003b 改为 `std::vector<IRenderablePtr> m_renderables` + `getRenderables()` 访问器，配合 `buildRenderingItemForRenderable(renderable, pass)` 辅助方法让 `FrameGraph::buildFromScene` 能逐个迭代。
-- **`FramePass.name` 必须是 `StringID`**: 不是 `std::string`，避免 frame-graph 和 `Scene::buildRenderingItem(pass)` 用两种不兼容的 key 类型。
-- **全局去重发生两次**: `RenderQueue::collectUniquePipelineBuildInfos()` 在 queue 内部去重，`FrameGraph::collectAllPipelineBuildInfos()` 再跨 queue 全局去重一次。即使"同一个 material 在两个 pass 里的 `PipelineKey` 相同"，也只产生一个 `PipelineBuildInfo`。
-- **`RenderTarget` 目前不参与 `PipelineKey`**: 只有一个 forward pass 时没必要；预留给未来多目标。等真的需要时要把 target 的 hash 也混进 `compose(TypeTag::PipelineKey, ...)` 或者单独开一级 target-aware key。
-- **排序是弱保证**: `RenderQueue::sort()` 按 `PipelineKey` 排序，但对于相同 key 的 item 是 stable 的（按插入序保持相对顺序），避免因排序改变语义相关的 draw order。
+- **`RenderQueue::buildFromScene` 是唯一 item 构造入口**: 所有 `RenderingItem` 都从它产生，无论调用方是 `FrameGraph::buildFromScene`、backend 的 `initScene` 还是测试 helper `firstItemFromScene`。保证 scene-level 资源合并 / pass-mask 过滤 / sort 的行为一致。
+- **Pass mask 过滤**: `IRenderable::supportsPass(pass)` 默认实现 `(getPassMask() & passFlagFromStringID(pass)) != 0`。不匹配的 renderable 不进入 queue，对 `collectUniquePipelineBuildInfos` 也不贡献 `PipelineBuildInfo`。
+- **Scene-level UBO 在 queue 层合并**: camera UBO 和 directional light UBO 由 `Scene::getSceneLevelResources()` 集中提供，`RenderQueue::buildFromScene` 合并到每个 item 末尾。backend 的 `initScene` / `draw` **不** 做任何额外注入。
+- **全局去重发生两次**: `RenderQueue::collectUniquePipelineBuildInfos()` 在 queue 内部去重，`FrameGraph::collectAllPipelineBuildInfos()` 再跨 queue 全局去重一次。相同 `PipelineKey` 只产生一个 `PipelineBuildInfo`。
+- **幂等重建**: `buildFromScene` 内部调 `clearItems()`，多次调用不会累加 item。
+- **`RenderTarget` 目前不参与 `PipelineKey`**: 只有一个 forward pass 时没必要；REQ-009（规划中）将让 Camera 持有 `RenderTarget`，backend `initScene` 从 device 派生 swapchain target 填入默认值。
+- **排序是稳定的**: `RenderQueue::sort()` 对相同 key 的 item 保持插入顺序，避免因排序改变语义相关的 draw order。
 
 ## 测试
 
-- `src/test/integration/test_frame_graph.cpp` — 覆盖 single-pass build、多 renderable 的收集、跨 pass 去重
+- `src/test/integration/test_frame_graph.cpp` — single-pass build、多 renderable 收集、跨 pass 去重、pass-mask 过滤（`testPassMaskFilterExcludesNonMatching`）、幂等重建（`testMultiPassRebuildIsIdempotent`）、`passFlagFromStringID` smoke（`testPassFlagFromStringIDSmoke`）
 - `src/test/integration/test_pipeline_build_info.cpp` — `fromRenderingItem` 的 backend-agnostic 契约
+- `src/test/integration/scene_test_helpers.hpp` — `firstItemFromScene(scene, pass)` 共享 helper
 
 ## 延伸阅读
 
-- `openspec/specs/frame-graph/spec.md` — `FramePass` / `FrameGraph` / `RenderQueue` / `ImageFormat` / `RenderTarget` 的所有 normative 要求
+- `openspec/specs/frame-graph/spec.md` — `FramePass` / `FrameGraph` / `RenderQueue::buildFromScene` / `IRenderable::supportsPass` / `Scene::getSceneLevelResources` 的所有 normative 要求
 - `openspec/specs/pipeline-build-info/spec.md` — 下游的 `PipelineBuildInfo` 派生逻辑
 - `openspec/specs/pipeline-cache/spec.md` — `preload` 契约
-- 归档: `openspec/changes/archive/2026-04-13-pipeline-prebuilding/` — REQ-003b 的完整实施
+- `notes/subsystems/scene.md` — Scene 的数据容器角色
+- 归档: `openspec/changes/archive/2026-04-14-frame-graph-drives-rendering/` — `FrameGraph` 真正驱动渲染路径的落地
+- 归档: `openspec/changes/archive/2026-04-13-pipeline-prebuilding/` — `FrameGraph` 基础设施的首次引入

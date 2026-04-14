@@ -14,10 +14,6 @@ Camera 的 GPU 端数据（view/proj 矩阵 + eye 位置）。`struct alignas(16
 纹理 + sampler 的成对包装，**同时** 是一个 `IRenderResource`（`Texture` 本身不是）。material 的 descriptor 路径只接受 `CombinedTextureSamplerPtr`，不接受裸 `TexturePtr`。
 → `src/core/resources/texture.hpp:49`
 
-### `DrawMaterial`（已废弃）
-
-曾是 `IMaterial` 的唯一实现，持有手写的 `BlinnPhongMaterialUBO` struct。**REQ-005 已彻底删除**，由 `MaterialInstance` 取代。注释或文档里提到它时应视为历史残留。
-
 ### `FramePass`
 
 `FrameGraph` 的基本单元。包含 `StringID name`（例如 `Pass_Forward`）、`RenderTarget target`、`RenderQueue queue`。
@@ -88,10 +84,6 @@ Vulkan backend 的 pipeline 存储。提供 `find(key) / getOrCreate(buildInfo, 
 Pipeline 的结构化身份，底层是一个 `StringID`。通过 `GlobalStringTable::compose(TypeTag::PipelineKey, {objectSig, materialSig})` 产生。可通过 `GlobalStringTable::toDebugString(key.id)` 完整还原成人类可读的 pipeline tree。
 → `src/core/resources/pipeline_key.hpp:11`
 
-### `PipelineSlotId`（已废弃）
-
-曾是硬编码的 descriptor slot 枚举（`CameraUBO` / `MaterialUBO` / `SkeletonUBO` / `AlbedoTexture` / ...）。**REQ-003b 之后**，descriptor 路由改为按 `IRenderResource::getBindingName() → StringID` 匹配反射 binding 名字，该枚举被废弃。
-
 ### `PushConstantRange`
 
 Core 层描述 push constant 的值类型（stageFlags + offset + size）。`PipelineBuildInfo.pushConstant` 的类型。目前由工厂注入引擎级约定（128 字节，vertex+fragment 可见）。
@@ -104,7 +96,7 @@ Core 层描述 push constant 的值类型（stageFlags + offset + size）。`Pip
 
 ### `RenderingItem`
 
-一次 draw call 的完整上下文值对象。字段：`shaderInfo / objectInfo / vertexBuffer / indexBuffer / descriptorResources / passMask / pass / pipelineKey / material`。由 `Scene::buildRenderingItem(pass)` 填充。
+一次 draw call 的完整上下文值对象。字段：`shaderInfo / objectInfo / vertexBuffer / indexBuffer / descriptorResources / passMask / pass / pipelineKey / material`。由 `RenderQueue::buildFromScene(scene, pass)` 构造（文件内 `makeItemFromRenderable` helper），scene-level UBO 由 `Scene::getSceneLevelResources()` 合并到末尾。
 → `src/core/scene/scene.hpp:14`
 
 ### `RenderPassEntry`
@@ -114,8 +106,13 @@ Core 层描述 push constant 的值类型（stageFlags + offset + size）。`Pip
 
 ### `RenderQueue`
 
-单个 pass 内的 draw call 队列。提供 `addItem / sort()`（按 PipelineKey 排序以减少 pipeline 切换）/ `collectUniquePipelineBuildInfos()`。
+单个 pass 内的 draw call 队列。除了 `addItem / sort / getItems / collectUniquePipelineBuildInfos`，还提供 `buildFromScene(scene, pass)` —— 从 scene 按 pass 过滤构造所有 `RenderingItem`，是全引擎**唯一**的 item 构造入口。
 → `src/core/scene/render_queue.hpp:12`
+
+### `passFlagFromStringID`
+
+`src/core/scene/pass.hpp/cpp` 里的自由函数。把 `Pass_Forward` / `Pass_Deferred` / `Pass_Shadow` 的 `StringID` 翻译成对应的 `ResourcePassFlag` 位。未知 pass 返回 0 位。`IRenderable::supportsPass` 的默认实现依赖它做 pass-mask 过滤。
+→ `src/core/scene/pass.hpp:26`
 
 ### `RenderState`
 

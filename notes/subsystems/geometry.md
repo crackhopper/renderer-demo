@@ -157,7 +157,7 @@ RenderableSubMesh { mesh, material, skeleton }
   │               })
   │
   ▼
-Scene::buildRenderingItem(pass)
+RenderQueue::buildFromScene(scene, pass)
   ├── item.vertexBuffer = mesh->vertexBuffer （包装成 IRenderResourcePtr）
   ├── item.indexBuffer  = mesh->indexBuffer
   └── item.pipelineKey 包含 vertex layout 签名

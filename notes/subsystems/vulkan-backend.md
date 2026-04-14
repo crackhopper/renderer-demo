@@ -9,8 +9,10 @@
 ### 顶层 (`src/backend/vulkan/`)
 
 - **`VulkanRenderer`** (`vk_renderer.hpp:8`) — 继承 `gpu::Renderer`，对外的主入口
-  - `initScene(scenePtr)` — 构建 `FrameGraph`、调 `pipelineCache.preload(...)`、注入 camera/light UBO
-  - `draw(item)` — 单次 draw 的封装
+  - 持有 `LX_core::FrameGraph m_frameGraph` 成员（生命周期和 scene 绑定）
+  - `initScene(scenePtr)` — 配置 `FramePass{Pass_Forward, ...}`、`m_frameGraph.buildFromScene(*scene)`、初始 resource sync、`preloadPipelines(m_frameGraph.collectAllPipelineBuildInfos())`
+  - `uploadData()` — 遍历 `m_frameGraph.getPasses() × pass.queue.getItems()` 执行每帧 dirty 同步
+  - `draw()` — 录制 → 遍历 `m_frameGraph` 每 pass 每 item 绑 pipeline/resources/draw → 提交/present
 - **`VulkanDevice`** (`details/vk_device.hpp:20`) — 物理/逻辑 device、queue、swapchain 的持有者
   - 构造参数：`IWindowPtr window`
   - 子 managers：`VulkanDescriptorManager` / `VulkanCommandBufferManager`
@@ -81,17 +83,17 @@ VulkanRenderer::draw(item)
         │ vkCmdDrawIndexed(...)
 ```
 
-## 描述符路由（REQ-003b 之后）
+## 描述符路由
 
-以前的路径靠硬编码的 `PipelineSlotId` 枚举（`CameraUBO` / `MaterialUBO` / `AlbedoTexture` / ...）在 resource 和 pipeline slot 之间建映射。REQ-003b 之后：
+所有 descriptor slot 的路由都由反射出的 binding name 驱动，不存在任何硬编码的 slot 枚举表：
 
 - 每个 `IRenderResource` 实现 `getBindingName() → StringID`
 - `VulkanCommandBuffer::bindResources` 从 pipeline 的 `ShaderResourceBinding` 列表取每个 binding 的 `name`
-- 用 `StringID(binding.name)` 在 `item.descriptorResources` 里查找
-- 没有硬编码的 enum lookup table
+- 用 `StringID(binding.name)` 在 `item.descriptorResources` 里查找匹配的资源
+- 匹配不到的 binding 是 bug（应确保 item 构造阶段合并了 scene 级 UBO + material 资源 + skeleton）
 
 这意味着：
-- 加一个新 UBO 只需要 (a) 实现一个 `IRenderResource` 子类 (b) shader 里声明正确的 block 名 — **不用改 backend 代码**
+- 加一个新 UBO 只需要 (a) 实现一个 `IRenderResource` 子类并 override `getBindingName()` (b) shader 里声明正确的 block 名 — **不用改 backend 代码**
 - 不同 shader 可以共存，各自有完全不同的 binding 集
 
 ## 和 core 的绑定点
@@ -114,7 +116,7 @@ VulkanRenderer::draw(item)
 - **`LX_core::backend` 是嵌套 namespace**: 不是独立的 `LX_backend`。意图是强调 backend 依附于 core 的契约。
 - **`VulkanResourceManager` 是 thin forwarder（REQ-003b 后）**: `getOrCreateRenderPipeline(item)` 只做 `pipelineCache.getOrCreate(fromRenderingItem(item), renderPass)`；内部不再有 pipeline 映射。如果看到它自己持 `unordered_map<PipelineKey, ...>`，那是 pre-REQ-003b 的老代码。
 - **Descriptor binding 名必须在 shader 声明里与 core 类的 `getBindingName()` 一致**: 这是唯一的耦合点。`CameraUBO` 的 shader 名必须是 `"CameraUBO"`；`SkeletonUBO` 的 shader 块必须叫 `Bones`（因为 `SkeletonUBO::getBindingName()` 返回 `"Bones"`）。这条契约由人工维护，没有编译期检查 —— 如果名字不一致，backend 会在 `bindResources` 时找不到，descriptor set 空着，GPU 读 0。
-- **`VulkanRenderer::initScene` 负责 scene UBO 注入**: `RenderableSubMesh::getDescriptorResources` **不**返回 scene 级 UBO（camera / light），这些由 `initScene` 从 `scene->camera->getUBO()` / `scene->directionalLight->getUBO()` 拿到后注入到每个 `RenderingItem::descriptorResources`。
+- **Scene 级 UBO 的合并路径**: `RenderableSubMesh::getDescriptorResources` **不**返回 scene 级 UBO（camera / light）。它们由 `Scene::getSceneLevelResources()` 集中暴露，`RenderQueue::buildFromScene` 在构造每个 item 时合并到 `descriptorResources` 末尾。Vulkan backend 的 `initScene` 不做任何 UBO 注入，直接消费 `m_frameGraph.getPasses() × pass.queue.getItems()`。
 - **Push constant 由 `ObjectPC` 承载**: 通过 `RenderingItem::objectInfo` 传递。`PC_Draw` (`src/core/gpu/render_resource.hpp:83`) 是 std140 layout 的 128 字节结构（`mat4 model + enableLighting + enableSkinning + padding[2]`）。
 - **Vulkan 版本依赖**: 用 `VK_API_VERSION_1_3`，依赖 `VK_KHR_dynamic_rendering` / `VK_EXT_descriptor_indexing` 等现代扩展（具体见 `vk_device.cpp`）。
 

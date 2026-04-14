@@ -1,6 +1,6 @@
 # Material System
 
-> 材质系统的唯一真相是 `MaterialInstance`：基于 shader 反射自动管理 UBO 字节 buffer 的模板-实例架构。REQ-005 之后 `DrawMaterial` 与硬编码的 `BlinnPhongMaterialUBO` 已**彻底删除**。
+> 材质系统的唯一真相是 `MaterialInstance`：模板-实例架构，基于 shader 反射自动管理 std140 字节 buffer。通过 `setVec3 / setVec4 / setFloat / setInt / setTexture` 按 `StringID` 写入，类型由反射的 `ShaderResourceBinding::members` 校验。
 >
 > 权威 spec: `openspec/specs/material-system/spec.md`
 > 深度设计: `docs/design/MaterialSystem.md`
@@ -14,7 +14,7 @@
   - `getShaderInfo() → IShaderPtr`
   - `getPassFlag() → ResourcePassFlag`
   - `getRenderState() → RenderState`
-  - `getRenderSignature(pass) → StringID`（REQ-007 之后）
+  - `getRenderSignature(pass) → StringID`
 - **`RenderState`** (`:68`) — 固定管线状态值类型；`getRenderSignature()` 贡献 pipeline 身份
 - **`RenderPassEntry`** (`:114`) — 一个 pass 的配置：`{renderState, shaderSet, bindingCache}`
 - **`MaterialTemplate`** (`:175`) — 材质蓝图
@@ -121,9 +121,9 @@ MaterialInstance::create(tmpl)
 Scene 通过 RenderableSubMesh 持有 MaterialPtr (= MaterialInstance::Ptr)
   │
   ▼
-Scene::buildRenderingItem(pass) 调用:
-  - material->getDescriptorResources() → [m_uboResource, tex1, tex2, ...]
-  - material->getRenderSignature(pass) → StringID
+RenderQueue::buildFromScene(scene, pass) 调用:
+  - sub->material->getDescriptorResources() → [m_uboResource, tex1, tex2, ...]
+  - sub->material->getRenderSignature(pass) → StringID
   │
   ▼
 RenderingItem
@@ -134,8 +134,7 @@ RenderingItem
 - **`MaterialUBO` 必须叫这个名字**: `MaterialInstance` 构造时硬编码查找 `binding.name == "MaterialUBO"` 来定位自己的 UBO。shader 里把 material uniform 块命名为其他名字会导致 `m_uboBinding == nullptr`，后续 setter 全部 assert fail。项目里的 scene 级 UBO (`LightUBO` / `CameraUBO` / `Bones`) 是**故意**不叫 MaterialUBO 的，它们属于其他 owner。
 - **非拷贝非移动**: `MaterialInstance` 拥有 `m_uboBuffer`（`vector<uint8_t>`）和 `m_uboResource`（持有指向 `m_uboBuffer` 的原始指针）。移动会让原始指针悬垂，所以类显式 `delete` 了拷贝/移动构造与赋值。`create()` 返回 `shared_ptr`。
 - **Texture 类型**: `setTexture` 接受 **`CombinedTextureSamplerPtr`**，不接受裸 `TexturePtr` —— 因为 `CombinedTextureSampler` 才是 `IRenderResource`。把 texture 和 sampler 成对包装是 backend 描述符写入的前提。
-- **`IMaterial::getShaderProgramSet()` 已废弃**: REQ-007 后 shader 身份通过 `getRenderSignature(pass)` 透传到 `PipelineKey`，没人再需要从 material 拿 `ShaderProgramSet` 了。该虚方法已从接口删除。
-- **Pass key 已是 `StringID`**: `MaterialTemplate::setPass(Pass_Forward, ...)`（REQ-007 之后）。老代码里如果看到 `setPass("Forward", ...)` 用字符串字面量的隐式构造也可以，效果相同（`StringID` 从 `const char*` 隐式构造）。
+- **Pass key 类型**: `MaterialTemplate::setPass(Pass_Forward, ...)`。`StringID` 可从 `const char*` 隐式构造（`setPass("Forward", ...)` 效果等价）。
 
 ## 测试
 

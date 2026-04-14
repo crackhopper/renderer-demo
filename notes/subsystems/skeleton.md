@@ -105,7 +105,7 @@ RenderableSubMesh { mesh, material, optional<SkeletonPtr> skeleton }
                 : StringID{}                               // id=0（无骨骼）
             })
 
-Scene::buildRenderingItem(pass)
+RenderQueue::buildFromScene(scene, pass)
   │
   └── item.descriptorResources 里包含 SkeletonUBO（如果有）
         │
