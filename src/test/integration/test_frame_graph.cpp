@@ -1,11 +1,14 @@
 #include "core/gpu/render_resource.hpp"
+#include "core/gpu/render_target.hpp"
 #include "core/resources/index_buffer.hpp"
 #include "core/resources/material.hpp"
 #include "core/resources/mesh.hpp"
 #include "core/resources/pipeline_build_info.hpp"
 #include "core/resources/shader.hpp"
 #include "core/resources/vertex_buffer.hpp"
+#include "core/scene/camera.hpp"
 #include "core/scene/frame_graph.hpp"
+#include "core/scene/light.hpp"
 #include "core/scene/object.hpp"
 #include "core/scene/pass.hpp"
 #include "core/scene/render_queue.hpp"
@@ -116,6 +119,23 @@ makeRenderable(const std::string &shaderName = "fake_fg",
   return std::make_shared<RenderableSubMesh>(mesh, material, nullptr);
 }
 
+// Helpers for REQ-009 scenarios.
+CameraPtr makeCameraWithTarget(const RenderTarget &target) {
+  auto cam = std::make_shared<Camera>(ResourcePassFlag::Forward);
+  cam->setTarget(target);
+  return cam;
+}
+
+CameraPtr makeCameraNoTarget() {
+  return std::make_shared<Camera>(ResourcePassFlag::Forward);
+}
+
+std::shared_ptr<DirectionalLight> makeLightWithMask(ResourcePassFlag mask) {
+  auto light = std::make_shared<DirectionalLight>(ResourcePassFlag::Forward);
+  light->setPassMask(mask);
+  return light;
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -219,6 +239,102 @@ void testPassFlagFromStringIDSmoke() {
          "unknown pass → 0");
 }
 
+void testMultiCameraTargetFilter() {
+  // REQ-009: camera filtered by target in getSceneLevelResources.
+  // Scene::Scene auto-adds a default camera at RenderTarget{} (sampleCount=1)
+  // and a default DirectionalLight with passMask = Forward|Deferred. We pick
+  // targetA/B with distinct sampleCount so the auto camera does NOT match.
+  const RenderTarget targetA{ImageFormat::BGRA8, ImageFormat::D32Float, 2};
+  const RenderTarget targetB{ImageFormat::BGRA8, ImageFormat::D32Float, 4};
+
+  auto camA = makeCameraWithTarget(targetA);
+  auto camB = makeCameraWithTarget(targetB);
+
+  auto scene = Scene::create(makeRenderable());
+  scene->addCamera(camA);
+  scene->addCamera(camB);
+
+  // For targetA: camA matches, camB doesn't, default camera doesn't (sc=1≠2).
+  // Default DirectionalLight matches Pass_Forward (mask = Forward|Deferred).
+  auto resA = scene->getSceneLevelResources(Pass_Forward, targetA);
+  EXPECT(resA.size() == 2,
+         "Forward×targetA: camA UBO + default light UBO (2 entries)");
+
+  // For targetB: only camB + default light.
+  auto resB = scene->getSceneLevelResources(Pass_Forward, targetB);
+  EXPECT(resB.size() == 2,
+         "Forward×targetB: camB UBO + default light UBO (2 entries)");
+
+  // Cross-check camera UBO identity: camA's UBO should be in resA but not resB.
+  if (resA.size() == 2 && resB.size() == 2) {
+    const auto camAUbo =
+        std::dynamic_pointer_cast<IRenderResource>(camA->getUBO());
+    EXPECT(resA[0] == camAUbo, "resA[0] is camA's UBO");
+    EXPECT(resB[0] != camAUbo, "resB[0] is NOT camA's UBO");
+  }
+}
+
+void testMultiLightPassMaskFilter() {
+  // REQ-009: light filtered by pass mask. Scene::Scene auto-adds one
+  // DirectionalLight (mask = Forward|Deferred) which counts toward both
+  // Forward and Deferred but not Shadow.
+  auto lightForward = makeLightWithMask(ResourcePassFlag::Forward);
+  auto lightShadow = makeLightWithMask(ResourcePassFlag::Shadow);
+  auto lightBoth = makeLightWithMask(ResourcePassFlag::Forward |
+                                     ResourcePassFlag::Shadow);
+
+  auto scene = Scene::create(makeRenderable());
+  scene->addLight(lightForward);
+  scene->addLight(lightShadow);
+  scene->addLight(lightBoth);
+
+  // Pass_Forward: default camera (sc=1) matches default target, default light
+  // matches Forward, lightForward matches, lightShadow does NOT, lightBoth
+  // matches. Total = 1 cam + 3 lights = 4.
+  auto resForward = scene->getSceneLevelResources(Pass_Forward, RenderTarget{});
+  EXPECT(resForward.size() == 4,
+         "Pass_Forward: 1 cam + default light + lightForward + lightBoth = 4");
+
+  // Pass_Shadow: default camera matches, default light does NOT (mask lacks
+  // Shadow), lightShadow matches, lightBoth matches, lightForward does NOT.
+  // Total = 1 cam + 2 lights = 3.
+  auto resShadow = scene->getSceneLevelResources(Pass_Shadow, RenderTarget{});
+  EXPECT(resShadow.size() == 3,
+         "Pass_Shadow: 1 cam + lightShadow + lightBoth = 3");
+}
+
+void testNullOptCameraBeforeAndAfterFill() {
+  // REQ-009: a camera with nullopt target never matches. After setTarget it
+  // matches exactly that target. Use a non-default target (sc=3) so we're
+  // isolated from the auto-added camera at sc=1.
+  const RenderTarget customTarget{ImageFormat::BGRA8, ImageFormat::D32Float, 3};
+
+  auto testCam = makeCameraNoTarget(); // m_target == nullopt
+  auto scene = Scene::create(makeRenderable());
+  scene->addCamera(testCam);
+
+  // Before setTarget: no camera matches customTarget (auto cam is sc=1,
+  // testCam is nullopt). Default DirectionalLight still matches Pass_Forward
+  // regardless of target. So result should be 0 cameras + 1 light = 1.
+  auto resBefore =
+      scene->getSceneLevelResources(Pass_Forward, customTarget);
+  EXPECT(resBefore.size() == 1,
+         "nullopt camera does not match customTarget (1 default-light only)");
+
+  // Fill the target on testCam.
+  testCam->setTarget(customTarget);
+
+  // After setTarget: testCam matches customTarget → 1 camera + 1 light = 2.
+  auto resAfter =
+      scene->getSceneLevelResources(Pass_Forward, customTarget);
+  EXPECT(resAfter.size() == 2,
+         "after setTarget(customTarget): testCam UBO + default light = 2");
+
+  // And sanity check: matchesTarget agrees.
+  EXPECT(testCam->matchesTarget(customTarget),
+         "testCam->matchesTarget(customTarget) after setTarget");
+}
+
 void testMultiPassRebuildIsIdempotent() {
   auto rA = makeRenderable("fake_fg_a", {},
                            ResourcePassFlag::Forward | ResourcePassFlag::Shadow);
@@ -269,6 +385,9 @@ int main() {
   testPassFlagFromStringIDSmoke();
   testPassMaskFilterExcludesNonMatching();
   testMultiPassRebuildIsIdempotent();
+  testMultiCameraTargetFilter();
+  testMultiLightPassMaskFilter();
+  testNullOptCameraBeforeAndAfterFill();
 
   if (failures > 0) {
     std::cerr << "FAILED: " << failures << " assertion(s)\n";

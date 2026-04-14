@@ -495,4 +495,33 @@ TEST_SCENARIO("camera with nullopt target does not match any target until filled
 
 ## 实施状态
 
-未开始。
+已完成并通过 `/finish-req` 验证（2026-04-14）。对应 openspec change `multi-camera-multi-light` 待归档，delta specs 将 sync 到 `openspec/specs/frame-graph` / `renderer-backend-vulkan`。
+
+**R1–R8 验证结果**（`/finish-req` 阶段，grep/read 逐条对照代码）：
+- R1: `LightBase` 抽象接口 (`src/core/scene/light.hpp:17`) — `getPassMask` / `getUBO` / `supportsPass` 虚方法齐备，默认实现使用 `passFlagFromStringID` ✓
+- R2: `DirectionalLight : public LightBase` (`light.hpp:67`) — `m_passMask` 默认 `Forward | Deferred`、`setPassMask` override、`getUBO() -> IRenderResourcePtr` ✓
+- R3: `Camera::m_target` (`camera.hpp:97`) + `getTarget` / `setTarget` / `clearTarget` / `matchesTarget`。`matchesTarget` 在 nullopt 时返回 false ✓
+- R3b: `RenderTarget::operator==` / `operator!=` (`src/core/gpu/render_target.hpp:21-26`)，按 `colorFormat` / `depthFormat` / `sampleCount` 三字段比较 ✓
+- R4: `Scene` 多容器 (`scene.hpp:75-76`) + `addCamera` / `addLight` / `getCameras` / `getLights`。老 `camera` / `directionalLight` 公开字段已删除 ✓
+- R5: `Scene::getSceneLevelResources(pass, target)` (`scene.cpp`) — camera 按 `matchesTarget(target)` 过滤、light 按 `supportsPass(pass)` 过滤、camera-first 顺序 ✓
+- R6: `RenderQueue::buildFromScene(scene, pass, target)` (`render_queue.cpp:67`) + `FrameGraph::buildFromScene` 委托 `pass.queue.buildFromScene(scene, pass.name, pass.target)` ✓
+- R7: `VulkanRendererImpl::initScene` (`vk_renderer.cpp:151,166`) — `makeSwapchainTarget()` 从 `device->getSurfaceFormat()` + `device->getDepthFormat()` 经 `toImageFormat(VkFormat)` 派生；回填 nullopt camera 发生在 `m_frameGraph.buildFromScene` **之前** ✓
+- R8: `test_frame_graph.cpp` 新增 `testMultiCameraTargetFilter` / `testMultiLightPassMaskFilter` / `testNullOptCameraBeforeAndAfterFill` 三个场景 — 全部通过 ✓
+- REQ-008 R3/R4/R6 的 "Partial supersede by REQ-009" banner 已追加到 `finished/008-frame-graph-drives-rendering.md` 顶部 ✓
+
+**`/finish-req` 顺带清理**:
+- `src/core/scene/scene.hpp` 删除两条 stale `// 简化 RenderingItem` / `// Scene 层简化示例` 注释（这些 REQ-008 之前的"简化示例"说法已经不成立，Scene 现在是完整的多容器形式）。
+
+**回归测试**（全部绿）:
+- `test_frame_graph` — 12 scenarios，含 3 个新 REQ-009 场景
+- `test_pipeline_build_info` / `test_pipeline_identity` / `test_material_instance` / `test_string_table` — non-GPU 核心层回归
+- GPU 依赖测试 (`test_vulkan_*`) 在无显示环境下 SKIP cleanly，编译期验证已在 full build 阶段完成
+
+**已知限制 / 约定**:
+- Scene 构造器仍然种下一个默认 Camera（带 `setTarget(RenderTarget{})`）和一个默认 DirectionalLight（`Forward | Deferred` pass mask）。这是为了让不经过 `VulkanRenderer::initScene` 的单元测试仍然能拿到非空的 scene-level resources；真实的 production camera 由 backend 的 nullopt 回填路径处理。
+- `toImageFormat(VkFormat)` 以 file-local static 形式住在 `vk_renderer.cpp` 的 anonymous namespace 中，不走 `vk_resource_manager.hpp` 的 export 路径 —— 唯一 caller 是 `makeSwapchainTarget()`，surface area 保持最小。
+
+**下游**:
+- 真正的 shadow pass —— `VulkanRenderer::initScene` 只要新增 `addPass(Pass_Shadow, shadowAtlasTarget, {})`，directional light 配 `Forward | Shadow` pass mask 即可
+- `PointLight` / `SpotLight` / `AreaLight` —— 基于 `LightBase` 接口新增，不用改 scene/queue
+- Overlay / UI pass —— 多 camera 共享 swapchain target，在不同 pass 各自绘制

@@ -10,7 +10,6 @@ namespace LX_core {
 
 using ShaderPtr = IShaderPtr;
 
-// 简化 RenderingItem
 struct RenderingItem {
   ShaderPtr shaderInfo;
   MaterialPtr material; // 材质句柄 — 用于 PipelineBuildInfo::fromRenderingItem
@@ -26,20 +25,23 @@ struct RenderingItem {
   PipelineKey pipelineKey;
 };
 
-// Scene 层简化示例
 class Scene {
 public:
   using Ptr = std::shared_ptr<Scene>;
 
-  CameraPtr camera;
-  DirectionalLightPtr directionalLight;
-
   Scene(IRenderablePtr mesh) {
     if (mesh)
       m_renderables.push_back(std::move(mesh));
-    camera = std::make_shared<Camera>(ResourcePassFlag::Forward);
-    directionalLight =
-        std::make_shared<DirectionalLight>(ResourcePassFlag::Forward);
+    // REQ-009: the ctor seeds a default Camera + DirectionalLight into the
+    // multi-container fields. The seeded camera is created with a default
+    // RenderTarget{} so tests that don't run through VulkanRenderer::initScene
+    // still see a non-empty scene-level resource list.
+    auto cam = std::make_shared<Camera>(ResourcePassFlag::Forward);
+    cam->setTarget(RenderTarget{});
+    m_cameras.push_back(std::move(cam));
+
+    m_lights.push_back(
+        std::make_shared<DirectionalLight>(ResourcePassFlag::Forward));
   }
 
   static auto create(IRenderablePtr mesh) {
@@ -54,18 +56,22 @@ public:
     m_renderables.push_back(std::move(r));
   }
 
-  /// 返回场景级 descriptor 资源：camera UBO、directional light UBO。
-  /// 由 RenderQueue::buildFromScene 在构造每个 RenderingItem 时追加合并到
-  /// item.descriptorResources 末尾，替代 VulkanRenderer::initScene 里原来的
-  /// 手工 push_back。顺序：camera 先、light 后，保持 descriptor binding 稳定。
-  ///
-  /// 本版本**无参**：单 camera / 单 light 假设下，所有资源一视同仁地合并到
-  /// 所有 item。REQ-009 会扩展为 getSceneLevelResources(pass, target) 的过滤
-  /// 版本。
-  std::vector<IRenderResourcePtr> getSceneLevelResources() const;
+  void addCamera(CameraPtr cam) { m_cameras.push_back(std::move(cam)); }
+  const std::vector<CameraPtr> &getCameras() const { return m_cameras; }
+
+  void addLight(LightBasePtr light) { m_lights.push_back(std::move(light)); }
+  const std::vector<LightBasePtr> &getLights() const { return m_lights; }
+
+  /// REQ-009 two-axis filter form: camera by matchesTarget(target), light by
+  /// supportsPass(pass). Returns camera UBOs first, then light UBOs; both in
+  /// their respective container insertion order. Empty return is valid.
+  std::vector<IRenderResourcePtr>
+  getSceneLevelResources(StringID pass, const RenderTarget &target) const;
 
 private:
   std::vector<IRenderablePtr> m_renderables;
+  std::vector<CameraPtr> m_cameras;
+  std::vector<LightBasePtr> m_lights;
 };
 
 using ScenePtr = Scene::Ptr;

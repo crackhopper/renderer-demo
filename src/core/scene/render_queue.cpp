@@ -64,11 +64,12 @@ RenderQueue::collectUniquePipelineBuildInfos() const {
   return out;
 }
 
-void RenderQueue::buildFromScene(const Scene &scene, StringID pass) {
+void RenderQueue::buildFromScene(const Scene &scene, StringID pass,
+                                 const RenderTarget &target) {
   clearItems();
 
-  // Scene 级资源（camera UBO + light UBO）拉取一次，复用给所有 item。
-  auto sceneResources = scene.getSceneLevelResources();
+  // REQ-009: target-filtered scene-level resources.
+  auto sceneResources = scene.getSceneLevelResources(pass, target);
 
   for (const auto &renderable : scene.getRenderables()) {
     if (!renderable)
@@ -78,8 +79,6 @@ void RenderQueue::buildFromScene(const Scene &scene, StringID pass) {
 
     RenderingItem item = makeItemFromRenderable(renderable, pass);
 
-    // 把 scene 级资源追加到 item.descriptorResources 末尾，保持
-    // "renderable 自己的资源在前、scene 级在后" 的 binding 顺序约定。
     item.descriptorResources.insert(item.descriptorResources.end(),
                                     sceneResources.begin(),
                                     sceneResources.end());

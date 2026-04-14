@@ -65,42 +65,61 @@ GPU 同步通过"dirty 标志 + ResourceManager 同步"：
 ```
 Scene 持有:
   - std::vector<IRenderablePtr> m_renderables
-  - CameraPtr camera
-  - DirectionalLightPtr directionalLight
-  - (getter) getSceneLevelResources() → {camera UBO, light UBO}
+  - std::vector<CameraPtr>      m_cameras       // REQ-009: 多相机
+  - std::vector<LightBasePtr>   m_lights        // REQ-009: 多光源
+  - (getter) getSceneLevelResources(pass, target)
+       // camera 按 target 过滤（matchesTarget），light 按 pass 过滤（supportsPass）
   │
   ▼
 VulkanRenderer::initScene(scene)                 src/backend/vulkan/vk_renderer.cpp
   │
-  │ m_frameGraph.addPass(FramePass{Pass_Forward, target, {}})
+  │ swapchainTarget = makeSwapchainTarget()      // 由 device 的 surface/depth 格式推导
+  │ for each cam in scene.getCameras():
+  │   if (!cam->getTarget()) cam->setTarget(swapchainTarget)   // 回填默认目标
+  │
+  │ m_frameGraph = FrameGraph{}                  // 每次 initScene 重新构造
+  │ m_frameGraph.addPass(FramePass{Pass_Forward, swapchainTarget, {}})
   │ m_frameGraph.buildFromScene(*scene)
   ▼
 FrameGraph::buildFromScene(scene)                src/core/scene/frame_graph.cpp
   │ for each FramePass in m_passes:
-  │   pass.queue.buildFromScene(scene, pass.name)
+  │   pass.queue.buildFromScene(scene, pass.name, pass.target)
   ▼
-RenderQueue::buildFromScene(scene, pass)         src/core/scene/render_queue.cpp
+RenderQueue::buildFromScene(scene, pass, target) src/core/scene/render_queue.cpp
   │ clearItems()
-  │ sceneResources = scene.getSceneLevelResources()   // camera + light UBO
+  │ sceneResources = scene.getSceneLevelResources(pass, target)
+  │     // 先 camera UBO（按 target 过滤），再 light UBO（按 pass 过滤）
   │
   │ for each renderable in scene.getRenderables():
   │   if (!renderable->supportsPass(pass)) continue;
   │   item = makeItemFromRenderable(renderable, pass)
   │     vertexBuffer / indexBuffer / objectInfo / shaderInfo / passMask / pass
   │     if (RenderableSubMesh && mesh && material):
-  │       item.pipelineKey = PipelineKey::build(
+  │       item.material     = sub->material
+  │       item.pipelineKey  = PipelineKey::build(
   │           sub->getRenderSignature(pass),
   │           sub->material->getRenderSignature(pass))
   │   item.descriptorResources += sceneResources     // 末尾追加
   │   m_items.push_back(item)
   │ sort()   // 按 PipelineKey 稳定排序
   ▼
-FrameGraph::collectAllPipelineBuildInfos()
-  │ PipelineBuildInfo::fromRenderingItem(item) × N
-  │ 跨 queue 按 PipelineKey 去重
+（回到 initScene 中）
+  │
+  │ // 初始资源同步 + push-constant 种子
+  │ for each pass in m_frameGraph.getPasses():
+  │   for each item in pass.queue.getItems():
+  │     syncResource(vertexBuffer / indexBuffer / descriptorResources)
+  │     if (item.objectInfo) item.objectInfo->update(PC_Draw{model=I, lighting=1})
+  │ resourceManager->collectGarbage()
+  │
   ▼
-PipelineCache::preload(buildInfos, renderPass)   src/backend/vulkan/details/pipelines/
+FrameGraph::collectAllPipelineBuildInfos()
+  │ pass.queue.collectUniquePipelineBuildInfos() × N
+  │ 跨 queue 按 PipelineKey 再去重一次
+  ▼
+VulkanResourceManager::preloadPipelines(infos)   src/backend/vulkan/details/pipelines/
   │ 为每个 PipelineBuildInfo 构建 VulkanPipeline 并缓存
+  │ （运行期 cache miss 仍可走 getOrCreateRenderPipeline，但会打 warning）
 
 ─────── 每帧运行期 ───────
 
@@ -109,8 +128,10 @@ VulkanRenderer::uploadData()
   │   for each item in pass.queue.getItems():
   │     syncResource(vertexBuffer / indexBuffer / descriptorResources)
   │     (dirty 的资源会被推到 GPU)
+  │ resourceManager->collectGarbage()
 
 VulkanRenderer::draw()
+  │ acquireNextImage / beginFrame / beginRenderPass
   │ for each pass in m_frameGraph.getPasses():
   │   for each item in pass.queue.getItems():
   │     pipeline = resourceManager.getOrCreateRenderPipeline(item)  // cache 命中
@@ -118,7 +139,10 @@ VulkanRenderer::draw()
   │     cmd->bindResources(resourceManager, pipeline, item)
   │       按 IRenderResource::getBindingName() 匹配反射 binding
   │     cmd->drawItem(item)
+  │ endRenderPass / submit / present
 ```
+
+> REQ-009 备注：`Scene` 已不再持有单一 `camera` / `directionalLight` 字段，而是用 `m_cameras` / `m_lights` 两个 vector。相机的目标轴和光源的 pass 轴是正交过滤维度，由 `getSceneLevelResources(pass, target)` 在 `RenderQueue::buildFromScene` 中合并消费。
 
 ## 核心接口层（src/core/gpu/）
 

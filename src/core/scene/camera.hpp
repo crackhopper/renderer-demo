@@ -1,5 +1,6 @@
 #pragma once
 #include "core/gpu/render_resource.hpp"
+#include "core/gpu/render_target.hpp"
 #include "core/math/mat.hpp" // 假设你有 Mat4f 定义
 #include "core/math/vec.hpp" // Vec3f
 #include <cmath>
@@ -75,6 +76,27 @@ public:
 
   CameraUBOPtr ubo;
 
+  /// REQ-009: the RenderTarget this camera draws to. `nullopt` means
+  /// "defaults to the swapchain" — `VulkanRenderer::initScene` is responsible
+  /// for backfilling nullopt cameras with the real swapchain target before
+  /// FrameGraph::buildFromScene runs. A nullopt camera does NOT match any
+  /// concrete target (see matchesTarget), so tests that rely on filter hits
+  /// must setTarget explicitly.
+  const std::optional<RenderTarget> &getTarget() const { return m_target; }
+  void setTarget(RenderTarget target) { m_target = std::move(target); }
+  void clearTarget() { m_target.reset(); }
+
+  /// True iff m_target has a value AND equals `target` field-by-field.
+  /// nullopt cameras always return false — the backfill contract is on
+  /// VulkanRenderer::initScene, not on this method.
+  bool matchesTarget(const RenderTarget &target) const {
+    return m_target.has_value() && *m_target == target;
+  }
+
+private:
+  std::optional<RenderTarget> m_target;
+
+public:
   // 更新矩阵（在渲染前调用）
   virtual void updateMatrices() {
     ubo->param.eyePos = position;

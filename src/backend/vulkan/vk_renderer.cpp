@@ -62,6 +62,36 @@ void debugLog(const char *message) {
   }
   std::cerr << "[RendererDebug] " << message << std::endl;
 }
+
+/// REQ-009: reverse of vk_resource_manager.cpp's toVkFormat(ImageFormat).
+/// Only covers the swapchain-relevant VkFormats. Unknown inputs fall back to
+/// RGBA8 and log a debug warning rather than throwing — initScene must be
+/// robust against whatever surface format the Vulkan driver exposes.
+LX_core::ImageFormat toImageFormat(VkFormat format) {
+  switch (format) {
+  case VK_FORMAT_B8G8R8A8_SRGB:
+  case VK_FORMAT_B8G8R8A8_UNORM:
+    return LX_core::ImageFormat::BGRA8;
+  case VK_FORMAT_R8G8B8A8_SRGB:
+  case VK_FORMAT_R8G8B8A8_UNORM:
+    return LX_core::ImageFormat::RGBA8;
+  case VK_FORMAT_R8_UNORM:
+    return LX_core::ImageFormat::R8;
+  case VK_FORMAT_D32_SFLOAT:
+    return LX_core::ImageFormat::D32Float;
+  case VK_FORMAT_D24_UNORM_S8_UINT:
+    return LX_core::ImageFormat::D24UnormS8;
+  case VK_FORMAT_D32_SFLOAT_S8_UINT:
+    return LX_core::ImageFormat::D32FloatS8;
+  default:
+    if (rendererDebugEnabled()) {
+      std::cerr << "[RendererDebug] toImageFormat: unknown VkFormat "
+                << static_cast<int>(format) << ", falling back to RGBA8"
+                << std::endl;
+    }
+    return LX_core::ImageFormat::RGBA8;
+  }
+}
 } // namespace
 
 namespace LX_core::backend {
@@ -114,25 +144,42 @@ public:
   }
   void shutdown() override { destroy(); }
 
-  // REQ-008 placeholder: RenderTarget is not yet consumed for filtering, so a
-  // default-constructed value is sufficient. REQ-009 will replace this with a
-  // VkFormat → ImageFormat derivation (makeSwapchainTarget()).
-  LX_core::RenderTarget defaultForwardTarget() const {
-    return LX_core::RenderTarget{};
+  /// REQ-009: derive the real swapchain RenderTarget from the Vulkan device's
+  /// chosen surface format + depth format. This is the value that gets plugged
+  /// into FramePass.target and also backfilled into any Camera whose m_target
+  /// is nullopt at initScene time.
+  LX_core::RenderTarget makeSwapchainTarget() const {
+    LX_core::RenderTarget t{};
+    t.colorFormat = toImageFormat(device->getSurfaceFormat().format);
+    t.depthFormat = toImageFormat(device->getDepthFormat());
+    t.sampleCount = 1;
+    return t;
   }
 
   void initScene(ScenePtr _scene) override {
     scene = _scene;
 
+    // REQ-009: compute the swapchain target once, use it for both:
+    //   1. Backfilling any nullopt camera's m_target (before buildFromScene).
+    //   2. Wiring up FramePass.target so getSceneLevelResources(pass, target)
+    //      can match the camera on the filter side.
+    const LX_core::RenderTarget swapchainTarget = makeSwapchainTarget();
+    for (const auto &cam : scene->getCameras()) {
+      if (cam && !cam->getTarget().has_value()) {
+        cam->setTarget(swapchainTarget);
+      }
+    }
+
     // Configure the FrameGraph. REQ-008 only wires up Pass_Forward; future
     // changes may add Pass_Shadow / Pass_Deferred with real targets.
     m_frameGraph = LX_core::FrameGraph{}; // Fresh graph on every initScene.
-    m_frameGraph.addPass(LX_core::FramePass{LX_core::Pass_Forward,
-                                            defaultForwardTarget(), {}});
+    m_frameGraph.addPass(
+        LX_core::FramePass{LX_core::Pass_Forward, swapchainTarget, {}});
 
     // RenderQueue::buildFromScene (invoked per pass below) internally:
     //   - filters renderables by supportsPass(pass)
-    //   - merges scene.getSceneLevelResources() (camera UBO + light UBO)
+    //   - merges scene.getSceneLevelResources(pass, target) (camera UBO filtered by
+    //     target, light UBO filtered by pass mask)
     //   - sorts by PipelineKey
     // There is no more side-channel camera/light UBO injection here.
     m_frameGraph.buildFromScene(*scene);

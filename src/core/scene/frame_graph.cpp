@@ -10,10 +10,11 @@ void FrameGraph::addPass(FramePass pass) {
 }
 
 void FrameGraph::buildFromScene(const Scene &scene) {
-  // 委托给 RenderQueue::buildFromScene —— 它负责 clearItems / supportsPass 过滤
-  /// / scene 级资源合并 / sort。FrameGraph 本身只是 pass 列表的 iteration 入口。
+  // REQ-009: delegate with pass.target so Scene::getSceneLevelResources
+  // can apply per-target camera filtering. Each FramePass already carries its
+  // own target; FrameGraph simply threads it through.
   for (auto &pass : m_passes) {
-    pass.queue.buildFromScene(scene, pass.name);
+    pass.queue.buildFromScene(scene, pass.name, pass.target);
   }
 }
 

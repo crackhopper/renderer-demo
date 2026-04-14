@@ -48,6 +48,30 @@ nav:
       - Geometry:           subsystems/geometry.md
       - Skeleton:           subsystems/skeleton.md
       - Vulkan Backend:     subsystems/vulkan-backend.md
+  - Tutorial — PBR 立方体:
+      - 概览:                tutorial/00-overview.md
+      - 01 PBR 理论:         tutorial/01-pbr-theory.md
+      - 02 PBR Shader:       tutorial/02-pbr-shader.md
+      - 03 Material Loader:  tutorial/03-material-loader.md
+      - 04 立方体几何:        tutorial/04-cube-geometry.md
+      - 05 main.cpp:         tutorial/05-app-main.md
+      - 06 构建与运行:        tutorial/06-build-and-run.md
+  - Roadmap — 走向 AI-Native 引擎:
+      - 总览:                  roadmaps/README.md
+      - 架构原则 (Principles): roadmaps/principles.md
+      - 00 Gap Analysis:       roadmaps/00-gap-analysis.md
+      - 01 渲染深度 + Web 后端: roadmaps/phase-1-rendering-depth.md
+      - 02 基础层 + 内省:       roadmaps/phase-2-foundation-layer.md
+      - 03 资产管线:           roadmaps/phase-3-asset-pipeline.md
+      - 04 动画:              roadmaps/phase-4-animation.md
+      - 05 物理:              roadmaps/phase-5-physics.md
+      - 06 Gameplay (TS):      roadmaps/phase-6-gameplay-layer.md
+      - 07 音频:              roadmaps/phase-7-audio.md
+      - 08 Vue UI 容器:        roadmaps/phase-8-web-ui.md
+      - 09 Web 编辑器:         roadmaps/phase-9-web-editor.md
+      - 10 MCP + Agent + CLI:  roadmaps/phase-10-ai-agent-mcp.md
+      - 11 AI 资产生成:        roadmaps/phase-11-ai-asset-generation.md
+      - 12 打包与发布:         roadmaps/phase-12-release.md
 
 markdown_extensions:
   - admonition

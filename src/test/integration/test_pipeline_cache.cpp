@@ -53,7 +53,7 @@ int main() {
     auto renderable = std::make_shared<LX_core::RenderableSubMesh>(
         meshPtr, material, LX_core::Skeleton::create({}));
     auto scene = LX_core::Scene::create(renderable);
-    // RenderQueue::buildFromScene internally merges scene.getSceneLevelResources(),
+    // RenderQueue::buildFromScene internally merges scene.getSceneLevelResources(pass, target),
     // so the item already carries camera + light UBOs — no side-channel injection.
     auto item = LX_test::firstItemFromScene(*scene, LX_core::Pass_Forward);
 

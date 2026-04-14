@@ -32,11 +32,22 @@ if [[ ! -f mkdocs.yml ]]; then
     exit 1
 fi
 
+# ---------- 生成包含 进行中需求 的 mkdocs.gen.yml ----------
+
+regen_site_config() {
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo "Error: python3 not found in PATH" >&2
+        exit 1
+    fi
+    python3 scripts/_gen_notes_site.py
+}
+
 # ---------- --build 模式（不起服务，无需检查端口）----------
 
 if [[ "${1:-}" == "--build" ]]; then
+    regen_site_config
     echo ">> Building static site to .site/ ..."
-    mkdocs build --clean
+    mkdocs build --clean -f mkdocs.gen.yml
     echo ""
     echo "Done. 临时预览:"
     echo "  python3 -m http.server --directory .site 8110"
@@ -166,8 +177,12 @@ PORT="$(extract_port "${ADDR}")"
 
 check_port_or_prompt "${PORT}"
 
-echo ">> Starting mkdocs serve on http://${ADDR}"
-echo "   docs_dir: notes/"
-echo "   stop:     Ctrl-C"
+regen_site_config
+
 echo ""
-exec mkdocs serve --dev-addr "${ADDR}"
+echo ">> Starting mkdocs serve on http://${ADDR}"
+echo "   docs_dir:  notes/"
+echo "   config:    mkdocs.gen.yml (notes + 进行中需求)"
+echo "   stop:      Ctrl-C"
+echo ""
+exec mkdocs serve --dev-addr "${ADDR}" -f mkdocs.gen.yml

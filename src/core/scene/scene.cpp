@@ -2,18 +2,34 @@
 
 namespace LX_core {
 
-std::vector<IRenderResourcePtr> Scene::getSceneLevelResources() const {
+std::vector<IRenderResourcePtr>
+Scene::getSceneLevelResources(StringID pass, const RenderTarget &target) const {
   std::vector<IRenderResourcePtr> out;
-  if (camera) {
-    if (auto camUbo = camera->getUBO()) {
+
+  // Cameras filter by target only. A camera draws to one target; whether a
+  // pass draws to that target is orthogonal to the camera's identity.
+  for (const auto &cam : m_cameras) {
+    if (!cam)
+      continue;
+    if (!cam->matchesTarget(target))
+      continue;
+    if (auto camUbo = cam->getUBO()) {
       out.push_back(std::dynamic_pointer_cast<IRenderResource>(camUbo));
     }
   }
-  if (directionalLight) {
-    if (auto lightUbo = directionalLight->getUBO()) {
-      out.push_back(std::dynamic_pointer_cast<IRenderResource>(lightUbo));
+
+  // Lights filter by pass only. A light's target scope is transitive — it
+  // illuminates any surface being drawn in a pass it participates in.
+  for (const auto &light : m_lights) {
+    if (!light)
+      continue;
+    if (!light->supportsPass(pass))
+      continue;
+    if (auto lightUbo = light->getUBO()) {
+      out.push_back(lightUbo);
     }
   }
+
   return out;
 }
 

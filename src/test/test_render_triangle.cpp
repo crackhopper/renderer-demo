@@ -77,11 +77,17 @@ int main() {
   auto scene = Scene::create(renderable);
   renderer->initScene(scene);
 
+  // REQ-009: the Scene ctor seeds exactly one Camera + one DirectionalLight.
+  // Grab them through the multi-container API for the frame loop below.
+  auto camera = scene->getCameras().front();
+  auto dirLight =
+      std::dynamic_pointer_cast<DirectionalLight>(scene->getLights().front());
+
   // Provide a default directional light; shader expects LightUBO values.
-  if (scene->directionalLight && scene->directionalLight->ubo) {
-    scene->directionalLight->ubo->param.dir = Vec4f{0.0f, -1.0f, 0.0f, 0.0f};
-    scene->directionalLight->ubo->param.color = Vec4f{1.0f, 1.0f, 1.0f, 1.0f};
-    scene->directionalLight->ubo->setDirty();
+  if (dirLight && dirLight->ubo) {
+    dirLight->ubo->param.dir = Vec4f{0.0f, -1.0f, 0.0f, 0.0f};
+    dirLight->ubo->param.color = Vec4f{1.0f, 1.0f, 1.0f, 1.0f};
+    dirLight->ubo->setDirty();
   }
 
   // 渲染循环
@@ -103,22 +109,22 @@ int main() {
     }
 
     // 设置摄像机矩阵
-    scene->camera->position = {0.0f, 0.0f, 3.0f};
-    scene->camera->target = {0.0f, 0.0f, 0.0f};
-    scene->camera->up = Vec3f(0.0f, 1.0f, 0.0f);
-    scene->camera->aspect = 800.0f / 600.0f;
+    camera->position = {0.0f, 0.0f, 3.0f};
+    camera->target = {0.0f, 0.0f, 0.0f};
+    camera->up = Vec3f(0.0f, 1.0f, 0.0f);
+    camera->aspect = 800.0f / 600.0f;
 
-    scene->camera->updateMatrices();
+    camera->updateMatrices();
     if (testDebugEnabled() && frameCounter < 3) {
       std::cerr << "[TriangleTest] frame=" << frameCounter << ", cameraPos=("
-                << scene->camera->position.x << "," << scene->camera->position.y
-                << "," << scene->camera->position.z << "), target=("
-                << scene->camera->target.x << "," << scene->camera->target.y
-                << "," << scene->camera->target.z << "), aspect="
-                << scene->camera->aspect << std::endl;
+                << camera->position.x << "," << camera->position.y
+                << "," << camera->position.z << "), target=("
+                << camera->target.x << "," << camera->target.y
+                << "," << camera->target.z << "), aspect="
+                << camera->aspect << std::endl;
       if (frameCounter == 0) {
-        const auto &view = scene->camera->ubo->param.view;
-        const auto &proj = scene->camera->ubo->param.proj;
+        const auto &view = camera->ubo->param.view;
+        const auto &proj = camera->ubo->param.proj;
         const std::array<Vec4f, 3> debugPositions = {
             Vec4f{-1.0f, 1.0f, 0.0f, 1.0f},
             Vec4f{1.0f, 1.0f, 0.0f, 1.0f},

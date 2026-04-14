@@ -1,5 +1,7 @@
 # REQ-008: FrameGraph 驱动真正的渲染路径
 
+> **Partial supersede by REQ-009**：R3 `Scene::getSceneLevelResources()` 无参版本、R4 `RenderQueue::buildFromScene(scene, pass)` 两参签名、R6 `defaultForwardTarget()` 占位路径已被 REQ-009 替换为 `getSceneLevelResources(pass, target)` / `buildFromScene(scene, pass, target)` / `makeSwapchainTarget()` 的真实派生版本。Scene 的单 camera/single-light 字段（`CameraPtr camera` / `DirectionalLightPtr directionalLight`）已被 `std::vector<CameraPtr>` / `std::vector<LightBasePtr>` 取代，`Camera` 持 `std::optional<RenderTarget>`，`LightBase` 升级为抽象接口。其他 R（R1/R2/R5/R7/R8）继续有效 —— `passFlagFromStringID` / `IRenderable::supportsPass` / 测试 helper `firstItemFromScene` / pass-mask 过滤 scenario 的结构没有变化。归档保留历史上下文；当前实现以 REQ-009 (`2026-04-14-multi-camera-multi-light` change) 为准。
+
 ## 背景
 
 本项目的渲染数据流目前存在一个架构上的明显错误：**`VulkanRenderer` 完全绕过了 `FrameGraph` / `RenderQueue`，持有一个单独的 `RenderingItem` 成员变量用于 draw**。具体表现：

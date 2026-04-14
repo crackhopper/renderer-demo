@@ -93,20 +93,24 @@ int main() {
         LX_core::Skeleton::create(std::vector<LX_core::Bone>{});
     auto scene = LX_core::Scene::create(renderable);
 
+    // REQ-009: reach the scene's default camera + directional light via the
+    // multi-container API (Scene::Scene seeds exactly one of each).
+    auto camera = scene->getCameras().front();
+    auto dirLight = std::dynamic_pointer_cast<LX_core::DirectionalLight>(
+        scene->getLights().front());
+
     // Default directional light UBO (shader expects it).
-    if (scene->directionalLight && scene->directionalLight->ubo) {
-      scene->directionalLight->ubo->param.dir =
-          LX_core::Vec4f{0.0f, -1.0f, 0.0f, 0.0f};
-      scene->directionalLight->ubo->param.color =
-          LX_core::Vec4f{1.0f, 1.0f, 1.0f, 1.0f};
-      scene->directionalLight->ubo->setDirty();
+    if (dirLight && dirLight->ubo) {
+      dirLight->ubo->param.dir = LX_core::Vec4f{0.0f, -1.0f, 0.0f, 0.0f};
+      dirLight->ubo->param.color = LX_core::Vec4f{1.0f, 1.0f, 1.0f, 1.0f};
+      dirLight->ubo->setDirty();
     }
 
     // Camera matrices needed for CameraUBO uploads.
-    scene->camera->position = {0.0f, 0.0f, 3.0f};
-    scene->camera->target = {0.0f, 0.0f, 0.0f};
-    scene->camera->up = LX_core::Vec3f{0.0f, 1.0f, 0.0f};
-    scene->camera->updateMatrices();
+    camera->position = {0.0f, 0.0f, 3.0f};
+    camera->target = {0.0f, 0.0f, 0.0f};
+    camera->up = LX_core::Vec3f{0.0f, 1.0f, 0.0f};
+    camera->updateMatrices();
 
     auto renderItem =
         LX_test::firstItemFromScene(*scene, LX_core::Pass_Forward);
