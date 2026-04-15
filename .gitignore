@@ -32,3 +32,4 @@ mkdocs.gen.yml
 notes/requirements/
 
 *.pyc
+.tmp
