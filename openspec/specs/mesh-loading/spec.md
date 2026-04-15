@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Define the current mesh-loading contract for OBJ and related mesh ingestion paths used by the renderer.
+
+## Requirements
 
 ### Requirement: OBJ mesh loading
 The mesh loading system SHALL provide an `ObjLoader` class capable of loading Wavefront OBJ files.

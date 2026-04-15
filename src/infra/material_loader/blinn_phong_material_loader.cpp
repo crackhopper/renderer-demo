@@ -13,7 +13,8 @@ namespace LX_infra {
 namespace fs = std::filesystem;
 
 LX_core::MaterialInstance::Ptr
-loadBlinnPhongMaterial(LX_core::ResourcePassFlag passFlag) {
+loadBlinnPhongMaterial(LX_core::ResourcePassFlag passFlag,
+                       std::vector<LX_core::ShaderVariant> variants) {
   const std::string baseName = "blinnphong_0";
 
   // Walk up from the current working directory to locate shaders/glsl.
@@ -39,20 +40,24 @@ loadBlinnPhongMaterial(LX_core::ResourcePassFlag passFlag) {
   const fs::path vert = glslDir / (baseName + ".vert");
   const fs::path frag = glslDir / (baseName + ".frag");
 
-  auto compiled = ShaderCompiler::compileProgram(vert, frag, {});
+  auto compiled = ShaderCompiler::compileProgram(vert, frag, variants);
   if (!compiled.success) {
     throw std::runtime_error("blinnphong compile failed: " +
                              compiled.errorMessage);
   }
 
   auto bindings = ShaderReflector::reflect(compiled.stages);
+  auto vertexInputs = ShaderReflector::reflectVertexInputs(compiled.stages);
   auto shader = std::make_shared<CompiledShader>(std::move(compiled.stages),
-                                             bindings, baseName);
+                                                 bindings, vertexInputs,
+                                                 baseName);
 
   auto tmpl = LX_core::MaterialTemplate::create(baseName, shader);
 
   LX_core::ShaderProgramSet programSet;
   programSet.shaderName = baseName;
+  programSet.variants = std::move(variants);
+  programSet.shader = shader;
 
   LX_core::RenderPassEntry entry;
   entry.shaderSet = programSet;

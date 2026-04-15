@@ -4,9 +4,11 @@
 namespace LX_infra {
 
 CompiledShader::CompiledShader(std::vector<LX_core::ShaderStageCode> stages,
-                       std::vector<LX_core::ShaderResourceBinding> bindings,
-                       std::string logicalName)
+                               std::vector<LX_core::ShaderResourceBinding> bindings,
+                               std::vector<LX_core::VertexInputAttribute> vertexInputs,
+                               std::string logicalName)
     : m_stages(std::move(stages)), m_bindings(std::move(bindings)),
+      m_vertexInputs(std::move(vertexInputs)),
       m_logicalName(std::move(logicalName)) {
   buildIndices();
   computeHash();
@@ -20,6 +22,11 @@ CompiledShader::getAllStages() const {
 const std::vector<LX_core::ShaderResourceBinding> &
 CompiledShader::getReflectionBindings() const {
   return m_bindings;
+}
+
+const std::vector<LX_core::VertexInputAttribute> &
+CompiledShader::getVertexInputs() const {
+  return m_vertexInputs;
 }
 
 std::optional<std::reference_wrapper<const LX_core::ShaderResourceBinding>>
@@ -41,6 +48,15 @@ CompiledShader::findBinding(const std::string &name) const {
   return std::nullopt;
 }
 
+std::optional<std::reference_wrapper<const LX_core::VertexInputAttribute>>
+CompiledShader::findVertexInput(uint32_t location) const {
+  auto it = m_vertexInputIndex.find(location);
+  if (it != m_vertexInputIndex.end()) {
+    return std::cref(m_vertexInputs[it->second]);
+  }
+  return std::nullopt;
+}
+
 size_t CompiledShader::getProgramHash() const { return m_hash; }
 
 void CompiledShader::buildIndices() {
@@ -51,6 +67,9 @@ void CompiledShader::buildIndices() {
     if (!b.name.empty()) {
       m_nameIndex[b.name] = i;
     }
+  }
+  for (size_t i = 0; i < m_vertexInputs.size(); ++i) {
+    m_vertexInputIndex[m_vertexInputs[i].location] = i;
   }
 }
 

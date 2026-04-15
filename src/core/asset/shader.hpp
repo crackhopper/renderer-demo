@@ -1,5 +1,6 @@
 #pragma once
 #include "core/rhi/render_resource.hpp"
+#include "core/rhi/vertex_buffer.hpp"
 #include "core/utils/string_table.hpp"
 #include <algorithm>
 #include <functional>
@@ -47,6 +48,11 @@ struct StructMemberInfo {
   ShaderPropertyType type; // Float / Int / Vec2 / Vec3 / Vec4 / Mat4
   uint32_t offset = 0;     // std140 byte offset within the block
   uint32_t size = 0;       // std140 declared byte size of this member
+
+  bool operator==(const StructMemberInfo &rhs) const {
+    return name == rhs.name && type == rhs.type && offset == rhs.offset &&
+           size == rhs.size;
+  }
 };
 
 /*****************************************************************
@@ -104,6 +110,16 @@ struct ShaderStageCode {
   std::vector<uint32_t> bytecode;
 };
 
+struct VertexInputAttribute {
+  std::string name;
+  uint32_t location = 0;
+  DataType type = DataType::Float1;
+
+  bool operator==(const VertexInputAttribute &rhs) const {
+    return name == rhs.name && location == rhs.location && type == rhs.type;
+  }
+};
+
 /*****************************************************************
  * IShader
  *****************************************************************/
@@ -116,6 +132,11 @@ public:
   virtual const std::vector<ShaderResourceBinding> &
   getReflectionBindings() const = 0;
 
+  virtual const std::vector<VertexInputAttribute> &getVertexInputs() const {
+    static const std::vector<VertexInputAttribute> kEmpty;
+    return kEmpty;
+  }
+
   /// ⭐ 快速查找（推荐）
   virtual std::optional<std::reference_wrapper<const ShaderResourceBinding>>
   findBinding(uint32_t set, uint32_t binding) const = 0;
@@ -123,6 +144,12 @@ public:
   /// fallback
   virtual std::optional<std::reference_wrapper<const ShaderResourceBinding>>
   findBinding(const std::string &name) const = 0;
+
+  virtual std::optional<std::reference_wrapper<const VertexInputAttribute>>
+  findVertexInput(uint32_t location) const {
+    (void)location;
+    return std::nullopt;
+  }
 
   virtual size_t getProgramHash() const = 0;
 
@@ -153,6 +180,7 @@ struct ShaderVariant {
 struct ShaderProgramSet {
   std::string shaderName;
   std::vector<ShaderVariant> variants;
+  IShaderPtr shader;
 
   size_t getHash() const {
     if (!m_dirty)
@@ -187,7 +215,15 @@ struct ShaderProgramSet {
     return getHash() == rhs.getHash();
   }
 
-  IShaderPtr getShader() const;
+  IShaderPtr getShader() const { return shader; }
+
+  bool hasEnabledVariant(const std::string &macroName) const {
+    for (const auto &variant : variants) {
+      if (variant.macroName == macroName)
+        return variant.enabled;
+    }
+    return false;
+  }
 
 private:
   void recomputeHash() const {

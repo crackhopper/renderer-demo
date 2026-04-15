@@ -1,4 +1,5 @@
 #include "material.hpp"
+#include "core/frame_graph/pass.hpp"
 
 #include <algorithm>
 #include <cstring>
@@ -17,6 +18,19 @@ const RenderPassEntry *firstEntry(const MaterialTemplate &tmpl) {
   return nullptr;
 }
 
+const ShaderResourceBinding *findMaterialUboBinding(const IShaderPtr &shader) {
+  if (!shader)
+    return nullptr;
+  const auto &bindings = shader->getReflectionBindings();
+  for (const auto &binding : bindings) {
+    if (binding.type == ShaderPropertyType::UniformBuffer &&
+        binding.name == "MaterialUBO") {
+      return &binding;
+    }
+  }
+  return nullptr;
+}
+
 } // namespace
 
 /*****************************************************************
@@ -26,25 +40,41 @@ const RenderPassEntry *firstEntry(const MaterialTemplate &tmpl) {
 MaterialInstance::MaterialInstance(Token, MaterialTemplate::Ptr tmpl,
                                    ResourcePassFlag passFlag)
     : m_template(std::move(tmpl)), m_passFlag(passFlag) {
-  if (!m_template || !m_template->getShader()) {
+  if (!m_template) {
     return;
   }
+
+  for (const auto &[pass, _] : m_template->getPasses()) {
+    const auto flag = passFlagFromStringID(pass);
+    if ((static_cast<uint32_t>(passFlag) & static_cast<uint32_t>(flag)) != 0) {
+      m_enabledPasses.insert(pass);
+    }
+  }
+
   // Convention: the per-material UBO block is named `MaterialUBO` in GLSL.
-  // Scene-level UBOs (LightUBO, CameraUBO, Bones) also show up in
-  // reflection but belong to other owners. If a future shader uses a
-  // different name, promote this to a configurable lookup key.
-  // TODO(multi-ubo): promote to a vector when a real shader needs 2+ UBOs.
-  const auto &bindings = m_template->getShader()->getReflectionBindings();
-  for (const auto &b : bindings) {
-    if (b.type != ShaderPropertyType::UniformBuffer)
+  // Build the instance-side CPU buffer from the enabled pass shader set rather
+  // than assuming the template shader is the one every pass uses.
+  const ShaderResourceBinding *selectedBinding = nullptr;
+  for (const auto &pass : getEnabledPasses()) {
+    const auto *candidate = findMaterialUboBinding(getShaderInfo(pass));
+    if (!candidate)
       continue;
-    if (b.name != "MaterialUBO")
+    if (!selectedBinding) {
+      selectedBinding = candidate;
       continue;
-    m_uboBinding = &b;
-    m_uboBuffer.assign(b.size, uint8_t{0});
-    m_uboResource = std::make_shared<UboByteBufferResource>(m_uboBuffer, b.size,
-                                                            m_passFlag);
-    break;
+    }
+    assert(selectedBinding->size == candidate->size &&
+           selectedBinding->members == candidate->members &&
+           "MaterialInstance enabled passes must agree on MaterialUBO layout");
+  }
+  if (!selectedBinding) {
+    selectedBinding = findMaterialUboBinding(m_template->getShader());
+  }
+  if (selectedBinding) {
+    m_uboBinding = selectedBinding;
+    m_uboBuffer.assign(selectedBinding->size, uint8_t{0});
+    m_uboResource = std::make_shared<UboByteBufferResource>(
+        m_uboBuffer, selectedBinding->size, m_passFlag);
   }
 }
 
@@ -144,6 +174,18 @@ IShaderPtr MaterialInstance::getShaderInfo() const {
   return m_template ? m_template->getShader() : nullptr;
 }
 
+IShaderPtr MaterialInstance::getShaderInfo(StringID pass) const {
+  if (!m_template)
+    return nullptr;
+  auto entry = m_template->getEntry(pass);
+  if (entry) {
+    auto shader = entry->get().shaderSet.getShader();
+    if (shader)
+      return shader;
+  }
+  return m_template->getShader();
+}
+
 RenderState MaterialInstance::getRenderState() const {
   const auto *entry = m_template ? firstEntry(*m_template) : nullptr;
   return entry ? entry->renderState : RenderState{};
@@ -155,6 +197,49 @@ StringID MaterialInstance::getRenderSignature(StringID pass) const {
   StringID passSig = m_template->getRenderPassSignature(pass);
   StringID fields[] = {passSig};
   return GlobalStringTable::get().compose(TypeTag::MaterialRender, fields);
+}
+
+bool MaterialInstance::isPassEnabled(StringID pass) const {
+  return m_enabledPasses.find(pass) != m_enabledPasses.end();
+}
+
+void MaterialInstance::setPassEnabled(StringID pass, bool enabled) {
+  const bool currentlyEnabled = isPassEnabled(pass);
+  if (enabled == currentlyEnabled)
+    return;
+
+  if (enabled) {
+    m_enabledPasses.insert(pass);
+    m_passFlag = m_passFlag | passFlagFromStringID(pass);
+  } else {
+    m_enabledPasses.erase(pass);
+    uint32_t mask = static_cast<uint32_t>(m_passFlag);
+    mask &= ~static_cast<uint32_t>(passFlagFromStringID(pass));
+    m_passFlag = static_cast<ResourcePassFlag>(mask);
+  }
+
+  for (const auto &[_, callback] : m_passStateListeners) {
+    if (callback)
+      callback();
+  }
+}
+
+std::vector<StringID> MaterialInstance::getEnabledPasses() const {
+  std::vector<StringID> out;
+  out.reserve(m_enabledPasses.size());
+  for (const auto &pass : m_enabledPasses)
+    out.push_back(pass);
+  return out;
+}
+
+uint64_t MaterialInstance::addPassStateListener(std::function<void()> callback) {
+  const uint64_t id = m_nextListenerId++;
+  m_passStateListeners.emplace(id, std::move(callback));
+  return id;
+}
+
+void MaterialInstance::removePassStateListener(uint64_t listenerId) {
+  m_passStateListeners.erase(listenerId);
 }
 
 } // namespace LX_core

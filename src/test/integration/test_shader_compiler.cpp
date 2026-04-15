@@ -1,10 +1,13 @@
 #include "infra/shader_compiler/shader_compiler.hpp"
 #include "infra/shader_compiler/compiled_shader.hpp"
 #include "infra/shader_compiler/shader_reflector.hpp"
+#include "core/rhi/render_resource.hpp"
 
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <sstream>
 #include <string>
 
 using namespace LX_core;
@@ -147,11 +150,12 @@ static bool testVariantCombination(
 
   // Reflect
   auto bindings = ShaderReflector::reflect(compileResult.stages);
+  auto vertexInputs = ShaderReflector::reflectVertexInputs(compileResult.stages);
   std::cout << "  Reflection found " << bindings.size() << " bindings\n";
 
   // Create CompiledShader
-  auto shader =
-      std::make_shared<CompiledShader>(std::move(compileResult.stages), bindings);
+  auto shader = std::make_shared<CompiledShader>(std::move(compileResult.stages),
+                                                 bindings, vertexInputs);
   std::cout << "  Program hash: 0x" << std::hex << shader->getProgramHash()
             << std::dec << "\n";
 
@@ -294,6 +298,86 @@ static bool testBlinnPhongMaterialUboMembers(const std::filesystem::path &vertPa
   return true;
 }
 
+static bool testBlinnPhongVariantVertexInputs(
+    const std::filesystem::path &vertPath,
+    const std::filesystem::path &fragPath) {
+  std::cout << "\n========================================\n";
+  std::cout << "  Test: BlinnPhong variant vertex inputs\n";
+  std::cout << "========================================\n";
+
+  auto baseCompile = ShaderCompiler::compileProgram(
+      vertPath, fragPath,
+      {{"USE_LIGHTING", true}, {"USE_SKINNING", false}});
+  auto skinnedCompile = ShaderCompiler::compileProgram(
+      vertPath, fragPath,
+      {{"USE_LIGHTING", true}, {"USE_SKINNING", true}});
+  if (!baseCompile.success || !skinnedCompile.success) {
+    std::cerr << "  FAIL: compile failed for variant input test\n";
+    return false;
+  }
+
+  auto baseInputs = ShaderReflector::reflectVertexInputs(baseCompile.stages);
+  auto skinnedInputs =
+      ShaderReflector::reflectVertexInputs(skinnedCompile.stages);
+
+  if (baseInputs.size() != 4) {
+    std::cerr << "  FAIL: expected 4 base vertex inputs, got "
+              << baseInputs.size() << "\n";
+    return false;
+  }
+  if (skinnedInputs.size() != 6) {
+    std::cerr << "  FAIL: expected 6 skinned vertex inputs, got "
+              << skinnedInputs.size() << "\n";
+    return false;
+  }
+
+  if (skinnedInputs[4].location != 4 || skinnedInputs[4].type != DataType::Int4 ||
+      skinnedInputs[5].location != 5 || skinnedInputs[5].type != DataType::Float4) {
+    std::cerr << "  FAIL: skinned variant input contract mismatch\n";
+    return false;
+  }
+
+  std::cout << "  PASS: skinned variant exposes additional vertex inputs\n";
+  return true;
+}
+
+static std::string readTextFile(const std::filesystem::path &path) {
+  std::ifstream ifs(path);
+  std::stringstream buffer;
+  buffer << ifs.rdbuf();
+  return buffer.str();
+}
+
+static bool testBlinnPhongPushConstantAbi(const std::filesystem::path &vertPath,
+                                          const std::filesystem::path &fragPath) {
+  std::cout << "\n========================================\n";
+  std::cout << "  Test: BlinnPhong push constant ABI\n";
+  std::cout << "========================================\n";
+
+  if (sizeof(PC_Base) != sizeof(Mat4f) || sizeof(PC_Draw) != sizeof(Mat4f)) {
+    std::cerr << "  FAIL: PC_Base/PC_Draw size mismatch with Mat4f\n";
+    return false;
+  }
+
+  const auto vertSource = readTextFile(vertPath);
+  const auto fragSource = readTextFile(fragPath);
+  const auto hasModelOnlyBlock = [](const std::string &source) {
+    return source.find("layout(push_constant) uniform ObjectPC") !=
+               std::string::npos &&
+           source.find("mat4 model;") != std::string::npos &&
+           source.find("enableLighting") == std::string::npos &&
+           source.find("enableSkinning") == std::string::npos;
+  };
+
+  if (!hasModelOnlyBlock(vertSource) || !hasModelOnlyBlock(fragSource)) {
+    std::cerr << "  FAIL: push constant block is not model-only in shader\n";
+    return false;
+  }
+
+  std::cout << "  PASS: PC ABI is model-only in C++ and GLSL\n";
+  return true;
+}
+
 int main(int argc, char *argv[]) {
   // Determine shader directory
   std::filesystem::path shaderDir;
@@ -344,6 +428,10 @@ int main(int argc, char *argv[]) {
   auto blinnFrag = shaderDir / "blinnphong_0.frag";
   if (std::filesystem::exists(blinnVert) && std::filesystem::exists(blinnFrag)) {
     if (!testBlinnPhongMaterialUboMembers(blinnVert, blinnFrag))
+      ++failures;
+    if (!testBlinnPhongVariantVertexInputs(blinnVert, blinnFrag))
+      ++failures;
+    if (!testBlinnPhongPushConstantAbi(blinnVert, blinnFrag))
       ++failures;
   } else {
     std::cerr << "  SKIP: blinnphong_0 shaders not found at " << shaderDir

@@ -119,8 +119,6 @@ int main() {
     if (renderItem.objectInfo) {
       LX_core::PC_Draw pc{};
       pc.model = LX_core::Mat4f::identity();
-      pc.enableLighting = 1;
-      pc.enableSkinning = 0;
       renderItem.objectInfo->update(pc);
     }
 

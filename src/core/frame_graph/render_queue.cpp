@@ -10,29 +10,17 @@ namespace LX_core {
 
 namespace {
 
-/// 把一个 IRenderable + pass 展开成一个 RenderingItem。REQ-008 之前这个逻辑
-/// 住在 Scene::buildRenderingItemForRenderable；现在搬到 RenderQueue 内部。
-RenderingItem makeItemFromRenderable(const IRenderablePtr &renderable,
-                                     StringID pass) {
+RenderingItem makeItemFromValidatedData(const ValidatedRenderablePassData &data) {
   RenderingItem item;
-  if (!renderable)
-    return item;
-
-  item.vertexBuffer = renderable->getVertexBuffer();
-  item.indexBuffer = renderable->getIndexBuffer();
-  item.objectInfo = renderable->getObjectInfo();
-  item.descriptorResources = renderable->getDescriptorResources();
-  item.shaderInfo = renderable->getShaderInfo();
-  item.passMask = renderable->getPassMask();
-  item.pass = pass;
-
-  auto sub = std::dynamic_pointer_cast<RenderableSubMesh>(renderable);
-  if (sub && sub->mesh && sub->material) {
-    item.material = sub->material;
-    StringID objectSig = sub->getRenderSignature(pass);
-    StringID materialSig = sub->material->getRenderSignature(pass);
-    item.pipelineKey = PipelineKey::build(objectSig, materialSig);
-  }
+  item.vertexBuffer = data.vertexBuffer;
+  item.indexBuffer = data.indexBuffer;
+  item.objectInfo = data.objectInfo;
+  item.descriptorResources = data.descriptorResources;
+  item.shaderInfo = data.shaderInfo;
+  item.material = data.material;
+  item.passMask = data.passMask;
+  item.pass = data.pass;
+  item.pipelineKey = data.pipelineKey;
   return item;
 }
 
@@ -76,8 +64,11 @@ void RenderQueue::buildFromScene(const Scene &scene, StringID pass,
       continue;
     if (!renderable->supportsPass(pass))
       continue;
+    auto validated = renderable->getValidatedPassData(pass);
+    if (!validated)
+      continue;
 
-    RenderingItem item = makeItemFromRenderable(renderable, pass);
+    RenderingItem item = makeItemFromValidatedData(validated->get());
 
     item.descriptorResources.insert(item.descriptorResources.end(),
                                     sceneResources.begin(),

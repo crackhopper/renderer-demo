@@ -159,6 +159,7 @@ public:
   virtual ~IMaterial() = default;
   virtual std::vector<IRenderResourcePtr> getDescriptorResources() const = 0;
   virtual IShaderPtr getShaderInfo() const = 0;
+  virtual IShaderPtr getShaderInfo(StringID pass) const { return getShaderInfo(); }
   virtual ResourcePassFlag getPassFlag() const = 0;
   virtual RenderState getRenderState() const = 0;
 
@@ -213,10 +214,17 @@ public:
   /// setters can resolve a member name directly.
   void buildBindingCache() {
     m_bindingCache.clear();
-    if (!m_shader)
-      return;
-    for (const auto &b : m_shader->getReflectionBindings()) {
-      m_bindingCache[StringID(b.name)] = b;
+    const auto addBindings = [&](const IShaderPtr &shader) {
+      if (!shader)
+        return;
+      for (const auto &b : shader->getReflectionBindings()) {
+        m_bindingCache[StringID(b.name)] = b;
+      }
+    };
+
+    addBindings(m_shader);
+    for (const auto &[_, entry] : m_passes) {
+      addBindings(entry.shaderSet.getShader());
     }
   }
 
@@ -226,6 +234,11 @@ public:
     if (it != m_bindingCache.end())
       return it->second;
     return std::nullopt;
+  }
+
+  const std::unordered_map<StringID, RenderPassEntry, StringID::Hash> &
+  getPasses() const {
+    return m_passes;
   }
 
 private:
@@ -294,6 +307,7 @@ public:
   // ==== IMaterial ====
   std::vector<IRenderResourcePtr> getDescriptorResources() const override;
   IShaderPtr getShaderInfo() const override;
+  IShaderPtr getShaderInfo(StringID pass) const override;
   ResourcePassFlag getPassFlag() const override { return m_passFlag; }
   RenderState getRenderState() const override;
   StringID getRenderSignature(StringID pass) const override;
@@ -316,6 +330,11 @@ public:
   MaterialTemplate::Ptr getTemplate() const { return m_template; }
   const std::vector<uint8_t> &getUboBuffer() const { return m_uboBuffer; }
   const ShaderResourceBinding *getUboBinding() const { return m_uboBinding; }
+  bool isPassEnabled(StringID pass) const;
+  void setPassEnabled(StringID pass, bool enabled);
+  std::vector<StringID> getEnabledPasses() const;
+  uint64_t addPassStateListener(std::function<void()> callback);
+  void removePassStateListener(uint64_t listenerId);
 
 private:
   /// Locate a UBO member by StringID, assert type, memcpy value, mark dirty.
@@ -336,6 +355,9 @@ private:
 
   // Per-instance sampler textures, keyed by binding name StringID.
   std::unordered_map<StringID, CombinedTextureSamplerPtr> m_textures;
+  std::unordered_set<StringID, StringID::Hash> m_enabledPasses;
+  std::unordered_map<uint64_t, std::function<void()>> m_passStateListeners;
+  uint64_t m_nextListenerId = 1;
 };
 
 } // namespace LX_core

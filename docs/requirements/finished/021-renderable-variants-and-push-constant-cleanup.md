@@ -318,6 +318,22 @@ ValidationResult validateRenderableAgainstMaterial(
 但要让这件事在当前架构里自洽，至少还要补上两条你原提法里尚未显式写出的要求：
 
 1. variants 明确归属于 `MaterialTemplate`，不再误挂到 `MaterialInstance`
+
+## 实施状态
+
+- 日期：2026-04-15
+- 验证结果：R1-R9 已复核；原先存在两处 drift，现已修正
+  - `Scene` 挂接 `SceneNode` 时补齐稳定的 `sceneName/nodeName` 调试 `StringID`
+  - 补充 `blinnphong_0` push constant ABI 对齐测试，明确验证 C++ 与 GLSL 都只保留统一 `model`
+- 额外修正：`MaterialInstance` 的 `MaterialUBO` 布局选择改为基于启用 pass 的 shader；legacy `RenderableSubMesh` 路径改为按 pass 选择 shader metadata，避免多 pass shader 覆盖时带错反射信息
+- 测试：
+  - `test_material_instance` — PASS
+  - `test_shader_compiler` — PASS
+  - `test_scene_node_validation` — PASS
+  - `test_pipeline_identity` — PASS
+  - `test_pipeline_build_info` — PASS
+  - `test_frame_graph` — PASS
+- 结论：REQ-021 当前实现与代码库状态一致，可归档
 2. 反射层必须新增 vertex input 契约，不能只靠现有 UBO/descriptor 反射
 3. 场景层要引入真正的高层 `IRenderable` / `SceneNode`，并把合法性校验前移到对象装配阶段
 

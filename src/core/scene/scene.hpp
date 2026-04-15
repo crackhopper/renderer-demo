@@ -5,6 +5,9 @@
 #include "core/scene/light.hpp"
 #include "core/scene/object.hpp"
 #include "core/frame_graph/pass.hpp"
+#include <exception>
+#include <iostream>
+#include <string>
 
 namespace LX_core {
 
@@ -29,9 +32,13 @@ class Scene {
 public:
   using Ptr = std::shared_ptr<Scene>;
 
-  Scene(IRenderablePtr mesh) {
+  Scene(std::string sceneName, IRenderablePtr mesh = nullptr)
+      : m_sceneName(std::move(sceneName)) {
+    if (m_sceneName.empty()) {
+      m_sceneName = "Scene";
+    }
     if (mesh)
-      m_renderables.push_back(std::move(mesh));
+      addRenderable(std::move(mesh));
     // REQ-009: the ctor seeds a default Camera + DirectionalLight into the
     // multi-container fields. The seeded camera is created with a default
     // RenderTarget{} so tests that don't run through VulkanRenderer::initScene
@@ -44,8 +51,16 @@ public:
         std::make_shared<DirectionalLight>(ResourcePassFlag::Forward));
   }
 
+  static auto create(std::string sceneName, IRenderablePtr mesh = nullptr) {
+    return std::make_shared<Scene>(std::move(sceneName), std::move(mesh));
+  }
+
   static auto create(IRenderablePtr mesh) {
-    return std::make_shared<Scene>(mesh);
+    return std::make_shared<Scene>("Scene", std::move(mesh));
+  }
+
+  static auto create(std::nullptr_t) {
+    return std::make_shared<Scene>("Scene", nullptr);
   }
 
   const std::vector<IRenderablePtr> &getRenderables() const {
@@ -53,6 +68,21 @@ public:
   }
 
   void addRenderable(IRenderablePtr r) {
+    if (r) {
+      for (const auto &existing : m_renderables) {
+        if (!existing)
+          continue;
+        if (existing->getNodeName() == r->getNodeName()) {
+          std::cerr << "FATAL [Scene] duplicate nodeName in scene '"
+                    << m_sceneName << "': " << r->getNodeName() << std::endl;
+          std::terminate();
+        }
+      }
+      if (auto node = std::dynamic_pointer_cast<SceneNode>(r)) {
+        node->setSceneDebugId(
+            StringID(m_sceneName + "/" + node->getNodeName()));
+      }
+    }
     m_renderables.push_back(std::move(r));
   }
 
@@ -61,6 +91,7 @@ public:
 
   void addLight(LightBasePtr light) { m_lights.push_back(std::move(light)); }
   const std::vector<LightBasePtr> &getLights() const { return m_lights; }
+  const std::string &getSceneName() const { return m_sceneName; }
 
   /// REQ-009 two-axis filter form: camera by matchesTarget(target), light by
   /// supportsPass(pass). Returns camera UBOs first, then light UBOs; both in
@@ -69,6 +100,7 @@ public:
   getSceneLevelResources(StringID pass, const RenderTarget &target) const;
 
 private:
+  std::string m_sceneName;
   std::vector<IRenderablePtr> m_renderables;
   std::vector<CameraPtr> m_cameras;
   std::vector<LightBasePtr> m_lights;

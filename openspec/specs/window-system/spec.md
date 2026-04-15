@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Define the current window-system contract for creating, managing, and exposing platform window handles to the renderer.
+
+## Requirements
 
 ### Requirement: Window creation and lifecycle management
 The window system SHALL provide a `Window` class with a constructor taking `(width, height, title)`, a destructor, and a PImpl pointer to hide platform-specific implementation details.

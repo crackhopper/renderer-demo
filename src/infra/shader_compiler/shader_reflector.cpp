@@ -37,6 +37,29 @@ mapMemberType(const spirv_cross::SPIRType &type) {
   return LX_core::ShaderPropertyType::Float;
 }
 
+static LX_core::DataType mapVertexInputType(const spirv_cross::SPIRType &type) {
+  using BT = spirv_cross::SPIRType::BaseType;
+  if ((type.basetype == BT::Int || type.basetype == BT::UInt) &&
+      type.columns == 1 && type.vecsize == 4) {
+    return LX_core::DataType::Int4;
+  }
+  if (type.basetype == BT::Float && type.columns == 1) {
+    switch (type.vecsize) {
+    case 1:
+      return LX_core::DataType::Float1;
+    case 2:
+      return LX_core::DataType::Float2;
+    case 3:
+      return LX_core::DataType::Float3;
+    case 4:
+      return LX_core::DataType::Float4;
+    default:
+      break;
+    }
+  }
+  return LX_core::DataType::Float1;
+}
+
 /// Walks the top-level members of a UBO struct and fills `out` with
 /// std140 layout info. On unsupported shapes (nested struct, array-of-struct,
 /// or any member with non-empty `array`), clears `out`, logs a warning, and
@@ -187,6 +210,33 @@ ShaderReflector::reflectSingleStage(const LX_core::ShaderStageCode &stage) {
   return bindings;
 }
 
+std::vector<LX_core::VertexInputAttribute>
+ShaderReflector::reflectSingleStageInputs(const LX_core::ShaderStageCode &stage) {
+  if (stage.stage != LX_core::ShaderStage::Vertex) {
+    return {};
+  }
+
+  std::vector<LX_core::VertexInputAttribute> inputs;
+  spirv_cross::Compiler compiler(stage.bytecode);
+  auto resources = compiler.get_shader_resources();
+  inputs.reserve(resources.stage_inputs.size());
+
+  for (const auto &res : resources.stage_inputs) {
+    LX_core::VertexInputAttribute attr;
+    attr.name = res.name;
+    attr.location = compiler.get_decoration(res.id, spv::DecorationLocation);
+    attr.type = mapVertexInputType(compiler.get_type(res.type_id));
+    inputs.push_back(std::move(attr));
+  }
+
+  std::sort(inputs.begin(), inputs.end(),
+            [](const LX_core::VertexInputAttribute &a,
+               const LX_core::VertexInputAttribute &b) {
+              return a.location < b.location;
+            });
+  return inputs;
+}
+
 std::vector<LX_core::ShaderResourceBinding>
 ShaderReflector::reflect(const std::vector<LX_core::ShaderStageCode> &stages) {
   std::unordered_map<SetBindingKey, LX_core::ShaderResourceBinding,
@@ -240,6 +290,17 @@ ShaderReflector::reflect(const std::vector<LX_core::ShaderStageCode> &stages) {
             });
 
   return result;
+}
+
+std::vector<LX_core::VertexInputAttribute>
+ShaderReflector::reflectVertexInputs(
+    const std::vector<LX_core::ShaderStageCode> &stages) {
+  for (const auto &stage : stages) {
+    if (stage.stage == LX_core::ShaderStage::Vertex) {
+      return reflectSingleStageInputs(stage);
+    }
+  }
+  return {};
 }
 
 } // namespace LX_infra

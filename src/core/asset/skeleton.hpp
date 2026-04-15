@@ -113,13 +113,6 @@ public:
   void updateUBO() { ubo->updateBy(bones); }
 
   SkeletonUboPtr getUBO() const { return ubo; }
-
-  /// Skeleton 存在即代表启用骨骼，返回固定的 "Skn1" 叶子 StringID。
-  /// 无骨骼的情况由调用方用 `StringID{}` 表达，不走这里。
-  StringID getRenderSignature() const {
-    return GlobalStringTable::get().Intern("Skn1");
-  }
-
 private:
   std::vector<Bone> bones;
   SkeletonUboPtr ubo;

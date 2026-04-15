@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Define the current frame-graph, render-target, and render-queue contracts used to build rendering work from a scene and preload pipelines.
+
+## Requirements
 
 ### Requirement: ImageFormat enum enumerates core-supported texel formats
 The system SHALL provide `LX_core::ImageFormat`, a `uint8_t`-backed enum covering at minimum `RGBA8`, `BGRA8`, `R8`, `D32Float`, `D24UnormS8`, and `D32FloatS8`. Backends SHALL provide a translation to their native format type (e.g., `VkFormat toVkFormat(ImageFormat)` in the Vulkan backend). Core layer code SHALL NOT reference backend-specific format types.
@@ -41,9 +45,11 @@ The system SHALL provide `LX_core::ImageFormat`, a `uint8_t`-backed enum coverin
 1. Call `clearItems()`.
 2. Retrieve `scene.getSceneLevelResources(pass, target)` once before iterating renderables.
 3. For each `IRenderablePtr` in `scene.getRenderables()`, skip null pointers and skip renderables for which `renderable->supportsPass(pass)` returns `false`.
-4. Construct a `RenderingItem` for each matching renderable (`vertexBuffer`, `indexBuffer`, `objectInfo`, `descriptorResources`, `shaderInfo`, `passMask`, `pass`, and — for `RenderableSubMesh` with non-null `mesh` and `material` — `material` and `pipelineKey = PipelineKey::build(sub->getRenderSignature(pass), sub->material->getRenderSignature(pass))`).
+4. For each remaining renderable, consume its already-validated structural result for `pass` and construct a `RenderingItem` from that cached data, filling `vertexBuffer`, `indexBuffer`, `objectInfo`, `descriptorResources`, `shaderInfo`, `passMask`, `pass`, `material`, and `pipelineKey`.
 5. Append the scene-level resources from step 2 to each item's `descriptorResources`, after the renderable's own resources.
 6. Push each item into `m_items` and call `sort()` at the end.
+
+`RenderQueue` MUST NOT perform first-time mesh/material/skeleton legality checks, variant interpretation, or structural descriptor validation during queue build. Those responsibilities belong to the validated renderable model.
 
 Renderable participation is decided by pass alone (via `supportsPass(pass)`); the `target` parameter is passed through purely for the scene-level-resource query.
 
@@ -53,20 +59,22 @@ The REQ-008 two-argument `buildFromScene(scene, pass)` overload SHALL NOT coexis
 - **WHEN** `queue.buildFromScene(scene, Pass_Forward, RenderTarget{})` is called twice in a row on the same scene
 - **THEN** the second call produces a queue with the same items as the first (not double-populated)
 
-#### Scenario: Renderable filtering ignores target
-- **WHEN** a scene has a renderable with `supportsPass(Pass_Forward) == true` and two cameras bound to distinct targets, and `buildFromScene(scene, Pass_Forward, targetA)` is called
-- **THEN** the item for that renderable is in the queue regardless of which target was passed; only the scene-level resources (camera UBO) change between `targetA` and `targetB`
+#### Scenario: Queue consumes validated entry without revalidating
+- **WHEN** a `SceneNode` already has a validated forward-pass cache entry and `buildFromScene(scene, Pass_Forward, target)` is called
+- **THEN** `RenderQueue` builds the item from that cached structural result and only appends scene-level resources for `target`
 
 ### Requirement: IRenderable supportsPass filter predicate
-`IRenderable` SHALL declare `virtual bool supportsPass(StringID pass) const`. The default implementation SHALL compute `passFlagFromStringID(pass)` and return `(getPassMask() & flag) != 0`. Subclasses MAY override to implement more granular filtering (e.g., filtering based on whether the material has a configured `Pass_Shadow` entry).
+`IRenderable` SHALL declare `virtual bool supportsPass(StringID pass) const`. The primary implementation, `SceneNode`, SHALL answer from the material instance's pass-enable state and the node's pass-level validated-entry cache. `supportsPass(pass)` MUST return `false` for unknown, absent, or disabled passes and MUST NOT trigger ad-hoc structural revalidation while answering the query.
 
-#### Scenario: Default implementation honors pass mask bits
-- **WHEN** a renderable has `getPassMask() == (ResourcePassFlag::Forward | ResourcePassFlag::Shadow)` and `supportsPass(Pass_Deferred)` is called
-- **THEN** the method returns `false`
+Other `IRenderable` implementations MAY provide equivalent semantics, but they MUST preserve the contract that pass support is a read-only query over already-established structural state.
 
-#### Scenario: Renderable with Forward mask supports Forward pass
-- **WHEN** a renderable has `getPassMask() == ResourcePassFlag::Forward` and `supportsPass(Pass_Forward)` is called
-- **THEN** the method returns `true`
+#### Scenario: Disabled pass returns false
+- **WHEN** a node's material instance has `Pass_Shadow` disabled
+- **THEN** `supportsPass(Pass_Shadow)` returns `false`
+
+#### Scenario: Cached enabled pass returns true
+- **WHEN** a node has a validated entry for `Pass_Forward` and that pass remains enabled on the material instance
+- **THEN** `supportsPass(Pass_Forward)` returns `true`
 
 ### Requirement: Scene exposes scene-level descriptor resources
 `LX_core::Scene` SHALL provide `std::vector<IRenderResourcePtr> getSceneLevelResources(StringID pass, const RenderTarget &target) const`. The method SHALL:

@@ -161,12 +161,13 @@ void testTopologyChangeProducesDifferentKey() {
   EXPECT(k1 != k2, "topology change must change the pipeline key");
 }
 
-void testSkeletonPresenceProducesDifferentKey() {
+void testSkeletonPresenceDoesNotProduceDifferentKey() {
   auto f = Fixture::make();
   auto skel = Skeleton::create({});
   PipelineKey noSkel = buildKey(f, Pass_Forward, nullptr);
   PipelineKey withSkel = buildKey(f, Pass_Forward, skel);
-  EXPECT(noSkel != withSkel, "adding a skeleton must change the pipeline key");
+  EXPECT(noSkel == withSkel,
+         "adding a skeleton alone must not change the pipeline key");
 }
 
 void testDifferentPassProducesDifferentKey() {
@@ -218,7 +219,7 @@ int main() {
   testEqualConfigsProduceSameKey();
   testVariantChangeProducesDifferentKey();
   testTopologyChangeProducesDifferentKey();
-  testSkeletonPresenceProducesDifferentKey();
+  testSkeletonPresenceDoesNotProduceDifferentKey();
   testDifferentPassProducesDifferentKey();
   testToDebugStringSmoke();
 

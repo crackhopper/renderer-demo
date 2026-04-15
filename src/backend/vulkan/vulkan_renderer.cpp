@@ -194,10 +194,8 @@ public:
           resourceManager->syncResource(*cmdBufferMgr, cpuRes);
         }
         if (item.objectInfo) {
-          PC_Draw pc{};
+          PC_Base pc{};
           pc.model = Mat4f::identity();
-          pc.enableLighting = 1;
-          pc.enableSkinning = 0;
           item.objectInfo->update(pc);
         }
       }

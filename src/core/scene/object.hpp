@@ -1,47 +1,45 @@
 #pragma once
-#include "core/rhi/render_resource.hpp"
-#include "core/math/mat.hpp"
 #include "core/asset/material.hpp"
 #include "core/asset/mesh.hpp"
 #include "core/asset/skeleton.hpp"
 #include "core/frame_graph/pass.hpp"
+#include "core/math/mat.hpp"
+#include "core/pipeline/pipeline_key.hpp"
+#include "core/rhi/render_resource.hpp"
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <memory>
 #include <optional>
+#include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace LX_core {
 
-// push constant - forward declaration and definition
 struct ObjectPC : public IRenderResource {
   using Ptr = std::shared_ptr<ObjectPC>;
 
-  // 默认提供最大 128 字节的存储空间，确保兼容所有 Pipeline
   alignas(16) uint8_t data[128] = {0};
-  uint32_t activeSize = sizeof(PC_Base); // 默认只同步 Model 矩阵
+  uint32_t activeSize = sizeof(PC_Base);
 
-  ObjectPC(ResourcePassFlag passFlag = ResourcePassFlag::Forward)
+  explicit ObjectPC(ResourcePassFlag passFlag = ResourcePassFlag::Forward)
       : passFlag(passFlag) {
-    // 初始化时设置默认 model 矩阵
     PC_Base base;
-    memcpy(data, &base, sizeof(base));
+    std::memcpy(data, &base, sizeof(base));
   }
 
-  // 提供一个模板方法，让材质（Material）能够根据需要更新数据
   template <typename T>
   void update(const T &params) {
     static_assert(sizeof(T) <= 128, "PushConstant block too large!");
-    memcpy(data, &params, sizeof(T));
+    std::memcpy(data, &params, sizeof(T));
     activeSize = sizeof(T);
   }
 
-  virtual ResourcePassFlag getPassFlag() const override { return passFlag; }
-  virtual ResourceType getType() const override {
-    return ResourceType::PushConstant;
-  }
-  virtual const void *getRawData() const override { return data; }
-  virtual u32 getByteSize() const override { return activeSize; }
+  ResourcePassFlag getPassFlag() const override { return passFlag; }
+  ResourceType getType() const override { return ResourceType::PushConstant; }
+  const void *getRawData() const override { return data; }
+  u32 getByteSize() const override { return activeSize; }
 
 private:
   ResourcePassFlag passFlag;
@@ -49,79 +47,131 @@ private:
 
 using ObjectPCPtr = ObjectPC::Ptr;
 
+struct ValidatedRenderablePassData {
+  StringID pass;
+  MaterialPtr material;
+  IShaderPtr shaderInfo;
+  ObjectPCPtr objectInfo;
+  IRenderResourcePtr vertexBuffer;
+  IRenderResourcePtr indexBuffer;
+  std::vector<IRenderResourcePtr> descriptorResources;
+  ResourcePassFlag passMask = ResourcePassFlag::Forward;
+  StringID objectSignature;
+  PipelineKey pipelineKey;
+};
+
 class IRenderable {
 public:
   virtual ~IRenderable() = default;
+
   virtual IRenderResourcePtr getVertexBuffer() const = 0;
   virtual IRenderResourcePtr getIndexBuffer() const = 0;
   virtual std::vector<IRenderResourcePtr> getDescriptorResources() const = 0;
   virtual ResourcePassFlag getPassMask() const = 0;
-
   virtual IShaderPtr getShaderInfo() const = 0;
   virtual ObjectPCPtr getObjectInfo() const { return nullptr; }
-
-  /// Structured object signature used to build PipelineKey via
-  /// `compose(TypeTag::ObjectRender, {meshSig, skelSig})`.
   virtual StringID getRenderSignature(StringID pass) const = 0;
+  virtual bool supportsPass(StringID pass) const = 0;
+  virtual std::string getNodeName() const = 0;
+  virtual StringID getDebugId() const { return StringID{}; }
 
-  /// 该 renderable 是否参与指定 pass。默认基于 getPassMask() 与
-  /// passFlagFromStringID(pass) 做位与判断。子类可 override 以实现更细粒度的
-  /// 过滤（例如根据 material 是否配置了 Pass_Shadow entry）。
-  virtual bool supportsPass(StringID pass) const {
-    const auto flag = passFlagFromStringID(pass);
-    return (static_cast<std::uint32_t>(getPassMask()) &
-            static_cast<std::uint32_t>(flag)) != 0;
-  }
+  virtual std::optional<std::reference_wrapper<const ValidatedRenderablePassData>>
+  getValidatedPassData(StringID pass) const = 0;
 };
 
 using IRenderablePtr = std::shared_ptr<IRenderable>;
 
-// 渲染子网格，先仅支持1个网格。
-struct RenderableSubMesh : public IRenderable {
+class SceneNode final : public IRenderable {
+public:
+  using Ptr = std::shared_ptr<SceneNode>;
+
+  SceneNode(std::string nodeName, MeshPtr mesh, MaterialInstance::Ptr material,
+            SkeletonPtr skeleton = nullptr);
+  ~SceneNode() override;
+
+  SceneNode(const SceneNode &) = delete;
+  SceneNode &operator=(const SceneNode &) = delete;
+  SceneNode(SceneNode &&) = delete;
+  SceneNode &operator=(SceneNode &&) = delete;
+
+  static Ptr create(std::string nodeName, MeshPtr mesh,
+                    MaterialInstance::Ptr material,
+                    SkeletonPtr skeleton = nullptr) {
+    return std::make_shared<SceneNode>(std::move(nodeName), std::move(mesh),
+                                       std::move(material),
+                                       std::move(skeleton));
+  }
+
+  const MeshPtr &getMesh() const { return m_mesh; }
+  const MaterialInstance::Ptr &getMaterialInstance() const {
+    return m_materialInstance;
+  }
+  const std::optional<SkeletonPtr> &getSkeleton() const { return m_skeleton; }
+
+  void setMesh(MeshPtr mesh);
+  void setMaterialInstance(MaterialInstance::Ptr material);
+  void setSkeleton(SkeletonPtr skeleton);
+
+  IRenderResourcePtr getVertexBuffer() const override;
+  IRenderResourcePtr getIndexBuffer() const override;
+  std::vector<IRenderResourcePtr> getDescriptorResources() const override;
+  ResourcePassFlag getPassMask() const override;
+  IShaderPtr getShaderInfo() const override;
+  ObjectPCPtr getObjectInfo() const override { return m_objectPC; }
+  StringID getRenderSignature(StringID pass) const override;
+  bool supportsPass(StringID pass) const override;
+  std::string getNodeName() const override { return m_nodeName; }
+  StringID getDebugId() const override { return m_debugId; }
+  void setSceneDebugId(StringID debugId) { m_debugId = debugId; }
+
+  std::optional<std::reference_wrapper<const ValidatedRenderablePassData>>
+  getValidatedPassData(StringID pass) const override;
+
+private:
+  void rebuildValidatedCache();
+  void registerMaterialPassListener();
+  void unregisterMaterialPassListener();
+
+  std::string m_nodeName;
+  MeshPtr m_mesh;
+  MaterialInstance::Ptr m_materialInstance;
+  std::optional<SkeletonPtr> m_skeleton;
+  ObjectPCPtr m_objectPC;
+  StringID m_debugId;
+  std::unordered_map<StringID, ValidatedRenderablePassData, StringID::Hash>
+      m_validatedPasses;
+  uint64_t m_materialPassListenerId = 0;
+};
+
+struct RenderableSubMesh final : public IRenderable {
 public:
   MeshPtr mesh;
   MaterialPtr material;
   std::optional<SkeletonPtr> skeleton;
   ObjectPCPtr objectPC;
+  std::string nodeName = "RenderableSubMesh";
 
   RenderableSubMesh(MeshPtr mesh_, MaterialPtr material_,
-                    SkeletonPtr skeleton_ = nullptr)
-      : mesh(std::move(mesh_)), material(std::move(material_)) {
-    if (skeleton_) {
-      skeleton = skeleton_;
-    }
-    objectPC = std::make_shared<ObjectPC>(material->getPassFlag());
-  }
+                    SkeletonPtr skeleton_ = nullptr,
+                    std::string nodeName_ = "RenderableSubMesh");
 
-  virtual IRenderResourcePtr getVertexBuffer() const {
-    return std::dynamic_pointer_cast<IRenderResource>(mesh->vertexBuffer);
-  }
-  virtual IRenderResourcePtr getIndexBuffer() const {
-    return std::dynamic_pointer_cast<IRenderResource>(mesh->indexBuffer);
-  }
-  virtual std::vector<IRenderResourcePtr> getDescriptorResources() const {
-    auto res = material->getDescriptorResources();
-    std::vector<IRenderResourcePtr> ret{res.begin(), res.end()};
-    if (skeleton.has_value()) {
-      ret.push_back(std::dynamic_pointer_cast<IRenderResource>(
-          skeleton.value()->getUBO()));
-    }
-    return ret;
-  }
-  virtual IShaderPtr getShaderInfo() const { return material->getShaderInfo(); }
-  virtual ObjectPCPtr getObjectInfo() const { return objectPC; }
-  virtual ResourcePassFlag getPassMask() const {
-    return material->getPassFlag();
-  }
+  IRenderResourcePtr getVertexBuffer() const override;
+  IRenderResourcePtr getIndexBuffer() const override;
+  std::vector<IRenderResourcePtr> getDescriptorResources() const override;
+  ResourcePassFlag getPassMask() const override;
+  IShaderPtr getShaderInfo() const override;
+  ObjectPCPtr getObjectInfo() const override { return objectPC; }
+  StringID getRenderSignature(StringID pass) const override;
+  bool supportsPass(StringID pass) const override;
+  std::string getNodeName() const override { return nodeName; }
+  StringID getDebugId() const override { return StringID(nodeName); }
+  std::optional<std::reference_wrapper<const ValidatedRenderablePassData>>
+  getValidatedPassData(StringID pass) const override;
 
-  StringID getRenderSignature(StringID pass) const override {
-    StringID meshSig = mesh ? mesh->getRenderSignature(pass) : StringID{};
-    StringID skelSig = skeleton.has_value()
-                           ? skeleton.value()->getRenderSignature()
-                           : StringID{};
-    StringID fields[] = {meshSig, skelSig};
-    return GlobalStringTable::get().compose(TypeTag::ObjectRender, fields);
-  }
+private:
+  mutable std::optional<ValidatedRenderablePassData> m_lastValidatedData;
 };
+
+using SceneNodePtr = SceneNode::Ptr;
 
 } // namespace LX_core

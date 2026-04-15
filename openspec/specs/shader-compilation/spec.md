@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Define the current shader-compilation contract for loading GLSL sources, compiling them to SPIR-V, and reporting failures.
+
+## Requirements
 
 ### Requirement: Load GLSL source from file system
 ShaderCompiler SHALL load GLSL source code from a given file path. It MUST support `.vert` and `.frag` file extensions for vertex and fragment stages respectively.

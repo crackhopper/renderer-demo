@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Define the current `PipelineBuildDesc` contract as the backend-facing bundle of graphics pipeline construction inputs.
+
+## Requirements
 
 ### Requirement: PipelineBuildDesc captures all pipeline construction inputs
 The system SHALL provide `LX_core::PipelineBuildDesc`, a core-layer struct that aggregates all data a backend needs to construct a graphics pipeline. It MUST contain at minimum:

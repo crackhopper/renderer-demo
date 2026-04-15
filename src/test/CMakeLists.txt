@@ -13,6 +13,7 @@ set(TEST_INTEGRATION_EXE_LIST
   test_pipeline_identity
   test_pipeline_build_info
   test_frame_graph
+  test_scene_node_validation
   test_pipeline_cache
   test_engine_loop
 

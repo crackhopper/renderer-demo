@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Define the current texture-loading contract for decoding image files into renderer-friendly texture resources.
+
+## Requirements
 
 ### Requirement: Texture loading from file
 The texture loading system SHALL provide a `TextureLoader` class capable of loading image files into GPU-friendly formats.

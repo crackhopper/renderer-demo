@@ -79,11 +79,7 @@ struct alignas(16) PC_Base {
   Mat4f model = Mat4f::identity();
 };
 
-/// Push constants for forward draws (e.g. blinnphong_0-style vertex shader).
-struct alignas(16) PC_Draw : public PC_Base {
-  int32_t enableLighting = 1;
-  int32_t enableSkinning = 0;
-  int32_t padding[2];
-};
+/// Transitional alias for the current engine-wide draw push-constant ABI.
+using PC_Draw = PC_Base;
 
 } // namespace LX_core

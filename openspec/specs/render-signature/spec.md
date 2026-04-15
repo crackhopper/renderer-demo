@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Define the current render-signature contract used to compose structured pass, object, material, and pipeline identity in core.
+
+## Requirements
 
 ### Requirement: Pass system constants
 The system SHALL provide a header `src/core/frame_graph/pass.hpp` exposing `StringID` constants `Pass_Forward`, `Pass_Deferred`, and `Pass_Shadow` in namespace `LX_core`. These constants MUST be declared `inline const` (not `constexpr`) because `StringID` construction interns the underlying name into `GlobalStringTable`.
@@ -12,7 +16,7 @@ The system SHALL provide a header `src/core/frame_graph/pass.hpp` exposing `Stri
 - **THEN** all three `StringID.id` values MUST be distinct
 
 ### Requirement: Leaf resources provide parameterless getRenderSignature
-Every leaf resource participating in pipeline identity SHALL provide a `StringID getRenderSignature() const` method that returns a structurally-interned `StringID` computed via `GlobalStringTable::compose(...)` or `GlobalStringTable::Intern(...)`. This applies to `VertexLayoutItem`, `VertexLayout`, `RenderState`, `ShaderProgramSet`, `Skeleton`, and `RenderPassEntry`.
+Every leaf resource participating in pipeline identity SHALL provide a `StringID getRenderSignature() const` method that returns a structurally-interned `StringID` computed via `GlobalStringTable::compose(...)` or `GlobalStringTable::Intern(...)`. This applies to `VertexLayoutItem`, `VertexLayout`, `RenderState`, `ShaderProgramSet`, and `RenderPassEntry`.
 
 `PrimitiveTopology` SHALL be handled by a free function `StringID topologySignature(PrimitiveTopology)` instead of a member, since enums cannot carry methods.
 
@@ -66,14 +70,14 @@ Every leaf resource participating in pipeline identity SHALL provide a `StringID
 - **THEN** `getRenderSignature(Pass_Forward)` continues to return the same `StringID` id
 
 ### Requirement: IRenderable exposes pass-aware getRenderSignature
-`IRenderable` SHALL declare `virtual StringID getRenderSignature(StringID pass) const = 0`. `RenderableSubMesh` SHALL override it as `compose(TypeTag::ObjectRender, {meshSig, skelSig})` where `meshSig = mesh->getRenderSignature(pass)` and `skelSig = skeleton.has_value() ? skeleton.value()->getRenderSignature() : StringID{}`.
+`IRenderable` SHALL declare `virtual StringID getRenderSignature(StringID pass) const = 0`. `SceneNode`, as the primary high-level implementation, SHALL override it as `compose(TypeTag::ObjectRender, {meshSig})` where `meshSig = mesh->getRenderSignature(pass)`. Optional `Skeleton` presence MUST NOT contribute a separate field to the object render signature.
 
-#### Scenario: Renderable without skeleton uses default skel signature
-- **WHEN** `RenderableSubMesh::getRenderSignature(Pass_Forward)` is called on an instance with `skeleton == std::nullopt`
-- **THEN** the returned compose contains `StringID{}` (id 0) as the second field
+#### Scenario: Skeleton presence does not change object signature
+- **WHEN** the same `SceneNode` is queried for `getRenderSignature(Pass_Forward)` before and after a `Skeleton` is attached, with the same mesh and material variants
+- **THEN** the returned `StringID` id is unchanged
 
-#### Scenario: Adding a skeleton changes the signature
-- **WHEN** the same `RenderableSubMesh` is queried before and after `skeleton` is assigned
+#### Scenario: Mesh change still changes object signature
+- **WHEN** a `SceneNode` switches to a mesh with a different render signature and `getRenderSignature(Pass_Forward)` is queried again
 - **THEN** the two `StringID` ids differ
 
 ### Requirement: passFlagFromStringID helper translates pass identity to pass flag

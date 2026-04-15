@@ -4,13 +4,18 @@
 
 This document defines the C++ coding standards and style guidelines for the game-dev/renderer project. These policies ensure consistent, maintainable, and safe code across the codebase.
 
-## Core Principles
+## Requirements
 
-### Zero Raw Pointers for Object References
+### Requirement: No raw pointers for object references
 
 Raw pointers (`T*`) SHALL NOT be used to hold references to other objects. This policy applies to all code paths except the two specific exceptions listed below.
 
 **Rationale**: Raw pointers obscure ownership semantics, invite dangling pointer bugs, and make lifetime requirements unclear. Modern C++ provides superior alternatives.
+
+#### Scenario: Non-owning dependency is represented by reference
+
+- **WHEN** a class stores a mandatory non-owning dependency
+- **THEN** it SHALL use `T&` instead of `T*`
 
 #### Exceptions (Allowed Raw Pointer Usage)
 
@@ -26,7 +31,9 @@ Raw pointers (`T*`) SHALL NOT be used to hold references to other objects. This 
 | `T*` for shared ownership | `std::shared_ptr<T>` | Multiple owners sharing an object |
 | `T*` for non-owning reference | `T&` | Reference (always non-nullable, injected via constructor) |
 
-### Ownership Guidelines
+### Requirement: Ownership semantics are explicit
+
+Ownership relationships SHALL be expressed explicitly through smart pointers or references, never through ambiguous raw-pointer conventions.
 
 1. **Single Ownership**: Use `std::unique_ptr<T>` when a class exclusively owns another object.
 
@@ -36,7 +43,14 @@ Raw pointers (`T*`) SHALL NOT be used to hold references to other objects. This 
 
 4. **No Ownership Transfer Ambiguity**: Function parameters and return types must have explicit ownership semantics. Do not use raw pointers for output parameters when the intent is to transfer ownership.
 
-### Class Member Guidelines
+#### Scenario: Owned collaborator uses unique_ptr
+
+- **WHEN** a class exclusively owns another object
+- **THEN** that member SHALL be represented by `std::unique_ptr<T>`
+
+### Requirement: Class members follow constructor-based ownership rules
+
+Class members SHALL be initialized and wired through constructor-based ownership rules.
 
 1. **Member Initialization**: Initialize all member variables in the constructor initializer list. Prefer member references over pointers for required dependencies.
 
@@ -44,7 +58,14 @@ Raw pointers (`T*`) SHALL NOT be used to hold references to other objects. This 
 
 3. **Mutable Members**: Only use `mutable` for cache/lazy-evaluation patterns where logical constness differs from physical constness.
 
-### Resource Management
+#### Scenario: Required dependency is initialized in constructor
+
+- **WHEN** a class depends on another object for its normal operation
+- **THEN** that dependency SHALL be initialized in the constructor rather than via setter injection
+
+### Requirement: Resources use RAII and smart-pointer factories
+
+Resources SHALL be managed through RAII wrappers and smart-pointer factory helpers.
 
 1. **RAII**: All resources (memory, handles, locks) must be managed via RAII wrappers. No manual `new`/`delete` except in factory methods or low-level wrappers.
 
@@ -52,7 +73,14 @@ Raw pointers (`T*`) SHALL NOT be used to hold references to other objects. This 
 
 3. **Smart Pointer Factory**: When creating objects that will be owned via `unique_ptr`, prefer `std::make_unique<T>()` over `new T()`.
 
-### Type Safety
+#### Scenario: Heap resource is created through make_unique
+
+- **WHEN** code allocates an owned heap object
+- **THEN** it SHALL prefer `std::make_unique<T>()` over raw `new`
+
+### Requirement: Type safety avoids low-level unsafe constructs
+
+Type-safety-sensitive code SHALL avoid low-level unsafe constructs except where explicitly allowed.
 
 1. **No `reinterpret_cast`** except in low-level Vulkan backend where required for API conformance. Document the reason.
 
@@ -60,7 +88,14 @@ Raw pointers (`T*`) SHALL NOT be used to hold references to other objects. This 
 
 3. **Prefer `std::optional<T>`** over sentinel values (e.g., `-1`, `nullptr`) for nullable types that are not pointers.
 
-### Modern C++ Features
+#### Scenario: Nullable non-pointer value uses optional
+
+- **WHEN** a value may be absent without implying pointer semantics
+- **THEN** it SHALL use `std::optional<T>` instead of a sentinel constant
+
+### Requirement: Modern C++ language features are used consistently
+
+Modern C++ language features SHALL be used consistently where they clarify intent and safety.
 
 1. **Use `[[nodiscard]]** on functions that must not ignore return values (e.g., factory methods returning `std::unique_ptr`).
 
@@ -72,9 +107,16 @@ Raw pointers (`T*`) SHALL NOT be used to hold references to other objects. This 
 
 5. **Use `enum class`** instead of unscoped enums.
 
-## Guideline Scenarios
+#### Scenario: Override is declared explicitly
 
-### Scenario: Class A creates and owns Class B
+- **WHEN** a derived class overrides a virtual function
+- **THEN** the overriding declaration SHALL include `override`
+
+### Requirement: Ownership and dependency patterns follow the style guide
+
+Ownership and dependency patterns SHALL follow the approved examples below.
+
+#### Scenario: Class A creates and owns Class B
 
 ```cpp
 // CORRECT
@@ -92,7 +134,7 @@ public:
 };
 ```
 
-### Scenario: Class A references Class B but does not own it (B outlives A)
+#### Scenario: Class A references Class B but does not own it (B outlives A)
 
 ```cpp
 // CORRECT - Reference for non-owning, non-nullable reference
@@ -110,7 +152,7 @@ public:
 };
 ```
 
-### Scenario: Dependency injection
+#### Scenario: Dependency injection
 
 ```cpp
 // CORRECT - Constructor injection with reference
@@ -135,15 +177,24 @@ public:
 };
 ```
 
-## Enforcement
+### Requirement: The style guide is enforced in tooling and review
+
+The style guide SHALL be enforced through tooling and review practices.
 
 - **Linter**: Configured to warn on raw pointer usage (excluding documented exceptions)
 - **Code Review**: Reviewers should verify ownership semantics are clear
 - **Architecture Review**: New classes must document ownership of member objects
 
-## Layer Dependency Rules
+#### Scenario: Review rejects ambiguous ownership
 
-### Core Layer Isolation
+- **WHEN** a code review encounters a new member with ambiguous ownership semantics
+- **THEN** the change MUST be revised before approval
+
+### Requirement: Layer dependencies remain isolated
+
+Layer dependencies SHALL remain isolated according to the architecture boundaries below.
+
+#### Core Layer Isolation
 
 The core layer (`src/core/`) SHALL NOT depend on any external libraries (Vulkan, SDL, GLFW, shaderc, SPIRV-Cross, etc.). Core defines platform-agnostic interfaces, math, resource types, and scene structures using only C++ standard library types.
 
@@ -185,7 +236,7 @@ The Vulkan backend (`src/backend/vulkan/`) follows these guidelines:
 - Handle types (VkDevice, VkBuffer, etc.) are not subject to this policy (opaque handles)
 - `VulkanResourceManager` owns its render pass, pipeline, and command buffer manager
 
-### GPU Object Return Type Convention
+#### GPU Object Return Type Convention
 
 GPU objects (objects wrapping Vulkan handles) MUST be returned via `std::unique_ptr<T>` from creation/factory functions, NOT by value. This ensures consistent ownership semantics and prevents object slicing.
 
@@ -199,7 +250,7 @@ VulkanCommandBuffer allocateBuffer();  // VIOLATION
 VulkanBuffer createBuffer(...);         // VIOLATION
 ```
 
-### CommandBuffer Design Principle
+#### CommandBuffer Design Principle
 
 `VulkanCommandBuffer` MUST NOT hold references to manager objects (e.g., `VulkanResourceManager`). If a command buffer needs to access a manager for operations, the manager reference should be passed as a parameter to the operation rather than stored as a member.
 
@@ -214,3 +265,8 @@ class VulkanCommandBuffer {
     VulkanResourceManager* m_resourceManager;  // VIOLATION
 };
 ```
+
+#### Scenario: Core layer defines its own external concepts
+
+- **WHEN** core needs to express a concept that later maps to Vulkan or another external API
+- **THEN** core SHALL define its own enum or struct instead of depending on external API types

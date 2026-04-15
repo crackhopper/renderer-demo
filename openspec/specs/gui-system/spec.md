@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Define the current GUI system contract for Dear ImGui integration and lifecycle management in the renderer project.
+
+## Requirements
 
 ### Requirement: GUI initialization with Vulkan
 The GUI system SHALL initialize Dear ImGui with Vulkan rendering backend using SDL3 for input.

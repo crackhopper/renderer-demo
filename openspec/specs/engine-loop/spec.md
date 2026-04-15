@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Define the current contract for the engine loop that orchestrates window, renderer, clock, and scene lifecycle above the backend.
+
+## Requirements
 
 ### Requirement: EngineLoop orchestrates renderer lifecycle above the backend
 The system SHALL provide an `EngineLoop` runtime abstraction above `gpu::Renderer`. `EngineLoop` SHALL coordinate a `Window`, a `Renderer`, a `Clock`, and the active `Scene` without moving frame-graph or Vulkan-specific execution policy into the backend.

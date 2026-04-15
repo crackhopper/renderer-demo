@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Define the current string-interning contract for `GlobalStringTable`, `StringID`, and structured composition of renderer identities.
+
+## Requirements
 
 ### Requirement: GlobalStringTable provides unique ID for each string
 `GlobalStringTable` SHALL maintain a global mapping from string to `uint32_t` ID. For any given string, the returned ID MUST be the same across all calls, regardless of calling thread or time.

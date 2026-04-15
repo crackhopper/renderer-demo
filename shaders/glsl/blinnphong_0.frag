@@ -6,9 +6,6 @@ layout(location = 2) in mat3 vTBN;
 
 layout(push_constant) uniform ObjectPC {
     mat4 model;
-    int  enableLighting;
-    int  enableSkinning; // 通常在顶点着色器使用，但为了布局对齐也写在这里
-    int  padding[2];
 } object;
 
 layout(set = 0, binding = 0) uniform LightUBO {
@@ -59,26 +56,27 @@ void main() {
     }
 
     // 4. 光照计算 (Blinn-Phong)
+    vec3 finalColor = baseCol;
+
+#ifdef USE_LIGHTING
     vec3 ambient = baseCol * 0.1; // 基础环境光项
-    vec3 finalColor = ambient;
+    finalColor = ambient;
 
-    if (object.enableLighting == 1) {
-        vec3 L = normalize(-sceneLight.dir.xyz);
-        vec3 V = normalize(camera.eyePos - vWorldPos);
-        
-        // --- 漫反射 (Diffuse) ---
-        float diff = max(dot(N, L), 0.0);
-        vec3 diffuse = diff * sceneLight.color.rgb;
+    vec3 L = normalize(-sceneLight.dir.xyz);
+    vec3 V = normalize(camera.eyePos - vWorldPos);
+    
+    // --- 漫反射 (Diffuse) ---
+    float diff = max(dot(N, L), 0.0);
+    vec3 diffuse = diff * sceneLight.color.rgb;
 
-        // --- 高光 (Specular) ---
-        // 使用强度系数代替开关，0.0 自动抵消计算结果
-        vec3 H = normalize(L + V); 
-        float spec = pow(max(dot(N, H), 0.0), material.shininess);
-        vec3 specular = spec * sceneLight.color.rgb * material.specularIntensity;
+    // --- 高光 (Specular) ---
+    vec3 H = normalize(L + V); 
+    float spec = pow(max(dot(N, H), 0.0), material.shininess);
+    vec3 specular = spec * sceneLight.color.rgb * material.specularIntensity;
 
-        // 最终叠加：(物体色 * 漫反射) + 镜面反射
-        finalColor += (baseCol * diffuse) + specular;
-    }
+    // 最终叠加：(物体色 * 漫反射) + 镜面反射
+    finalColor += (baseCol * diffuse) + specular;
+#endif
 
     outColor = vec4(finalColor, 1.0);
 }

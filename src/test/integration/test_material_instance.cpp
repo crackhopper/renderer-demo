@@ -31,6 +31,43 @@ int s_failures = 0;
     }                                                                          \
   } while (0)
 
+class FakeShader : public IShader {
+public:
+  explicit FakeShader(std::vector<ShaderResourceBinding> bindings)
+      : m_bindings(std::move(bindings)) {}
+
+  const std::vector<ShaderStageCode> &getAllStages() const override {
+    return m_stages;
+  }
+  const std::vector<ShaderResourceBinding> &
+  getReflectionBindings() const override {
+    return m_bindings;
+  }
+  std::optional<std::reference_wrapper<const ShaderResourceBinding>>
+  findBinding(uint32_t set, uint32_t binding) const override {
+    for (const auto &item : m_bindings) {
+      if (item.set == set && item.binding == binding)
+        return std::cref(item);
+    }
+    return std::nullopt;
+  }
+  std::optional<std::reference_wrapper<const ShaderResourceBinding>>
+  findBinding(const std::string &name) const override {
+    for (const auto &item : m_bindings) {
+      if (item.name == name)
+        return std::cref(item);
+    }
+    return std::nullopt;
+  }
+  size_t getProgramHash() const override { return 0; }
+  const void *getRawData() const override { return nullptr; }
+  u32 getByteSize() const override { return 0; }
+
+private:
+  std::vector<ShaderStageCode> m_stages;
+  std::vector<ShaderResourceBinding> m_bindings;
+};
+
 std::filesystem::path findShaderDir() {
   std::filesystem::path cwd = std::filesystem::current_path();
   for (int i = 0; i < 4; ++i) {
@@ -60,12 +97,15 @@ buildInstanceFromBlinnPhong(ResourcePassFlag flag = ResourcePassFlag::Forward) {
     return nullptr;
   }
   auto bindings = ShaderReflector::reflect(compile.stages);
+  auto vertexInputs = ShaderReflector::reflectVertexInputs(compile.stages);
   auto shader = std::make_shared<CompiledShader>(std::move(compile.stages),
-                                             bindings, "blinnphong_0");
+                                                 bindings, vertexInputs,
+                                                 "blinnphong_0");
 
   auto tmpl = MaterialTemplate::create("blinnphong_0", shader);
   ShaderProgramSet set;
   set.shaderName = "blinnphong_0";
+  set.shader = shader;
   RenderPassEntry entry;
   entry.shaderSet = set;
   entry.renderState = RenderState{};
@@ -212,6 +252,46 @@ void test_loader_produces_valid_instance() {
   std::cout << "  loader returned a seeded MaterialInstance\n";
 }
 
+void test_ubo_layout_comes_from_enabled_pass_shader() {
+  std::cout << "\n-- test_ubo_layout_comes_from_enabled_pass_shader --\n";
+
+  ShaderResourceBinding baseBinding;
+  baseBinding.name = "MaterialUBO";
+  baseBinding.set = 2;
+  baseBinding.binding = 0;
+  baseBinding.type = ShaderPropertyType::UniformBuffer;
+  baseBinding.size = 32;
+
+  ShaderResourceBinding shadowBinding = baseBinding;
+  shadowBinding.size = 64;
+
+  auto baseShader =
+      std::make_shared<FakeShader>(std::vector<ShaderResourceBinding>{baseBinding});
+  auto shadowShader = std::make_shared<FakeShader>(
+      std::vector<ShaderResourceBinding>{shadowBinding});
+
+  auto tmpl = MaterialTemplate::create("multi_pass_fake", baseShader);
+
+  ShaderProgramSet forwardSet;
+  forwardSet.shaderName = "fake_forward";
+  forwardSet.shader = baseShader;
+  RenderPassEntry forwardEntry;
+  forwardEntry.shaderSet = forwardSet;
+  tmpl->setPass(Pass_Forward, std::move(forwardEntry));
+
+  ShaderProgramSet shadowSet;
+  shadowSet.shaderName = "fake_shadow";
+  shadowSet.shader = shadowShader;
+  RenderPassEntry shadowEntry;
+  shadowEntry.shaderSet = shadowSet;
+  tmpl->setPass(Pass_Shadow, std::move(shadowEntry));
+
+  auto mat = MaterialInstance::create(tmpl, ResourcePassFlag::Shadow);
+  REQUIRE(mat->getUboBinding() != nullptr);
+  REQUIRE(mat->getUboBuffer().size() == 64);
+  std::cout << "  enabled pass shader selected the 64-byte UBO layout\n";
+}
+
 } // namespace
 
 int main() {
@@ -221,6 +301,7 @@ int main() {
   test_descriptor_resources_stable_ubo_identity();
   test_descriptor_resources_reflects_buffer_writes();
   test_loader_produces_valid_instance();
+  test_ubo_layout_comes_from_enabled_pass_shader();
 
   std::cout << "\n========================================\n";
   if (s_failures == 0) {

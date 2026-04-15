@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Define the current Vulkan pipeline cache contract, including lookup, preload, and runtime cache-miss handling.
+
+## Requirements
 
 ### Requirement: PipelineCache is a standalone, backend-owned class
 The Vulkan backend SHALL provide `LX_core::backend::PipelineCache` as a dedicated class whose sole responsibility is storing and materializing `VulkanPipeline` instances keyed by `PipelineKey`. `VulkanResourceManager` SHALL NOT own the pipeline map directly; if it exposes a `getOrCreateRenderPipeline` helper for backward compatibility, that helper SHALL delegate to `PipelineCache`.
