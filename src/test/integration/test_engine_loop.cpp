@@ -1,4 +1,5 @@
 #include "core/gpu/engine_loop.hpp"
+#include "core/input/dummy_input_state.hpp"
 
 #include <iostream>
 #include <memory>
@@ -47,6 +48,10 @@ public:
   }
   void destroyGraphicsHandle(GraphicsAPI, GraphicsInstanceHandle,
                              WindowGraphicsHandle) const override {}
+  InputStatePtr getInputState() const override {
+    static auto dummy = std::make_shared<DummyInputState>();
+    return dummy;
+  }
   void onClose(std::function<void()> cb) override { m_onClose = std::move(cb); }
   bool shouldClose() override {
     ++shouldCloseCalls;

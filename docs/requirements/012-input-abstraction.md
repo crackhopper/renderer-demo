@@ -1,25 +1,26 @@
-# REQ-012: Window 输入抽象接口（IInputState）
+# REQ-012: Window 输入抽象接口（`IInputState`）
 
 ## 背景
 
-当前窗口系统 **完全没有暴露任何输入事件**：
+当前窗口系统还没有向 `core/` 层暴露任何统一的输入状态接口。
 
-- `src/core/platform/window.hpp:8-37` 的 `Window` 接口只有 `getWidth/Height` / `updateSize` / `shouldClose` / `onClose`，没有任何鼠标 / 键盘相关方法
-- `src/infra/window/sdl_window.cpp:39-46` 的 `Impl::shouldClose` 直接吃掉 `SDL_PollEvent` 的所有事件并丢弃 —— 即使 SDL 已经分发了鼠标 / 键盘事件，上层也无从获取
-- `src/test/test_render_triangle.cpp:104-114` 的循环里相机参数全部硬编码，没有任何交互
+2026-04-16 按当前代码核查：
 
-为了支持 REQ-015 / REQ-016 的相机控制器和 REQ-017 的 ImGui 输入 forwarding，必须先把"键盘按键状态、鼠标位置、鼠标按键状态、滚轮"这四类基础信号从 SDL 抽象到 `core/` 层。
+- [src/core/platform/window.hpp](../../src/core/platform/window.hpp) 的 `Window` 接口只有窗口尺寸、graphics handle、`onClose()`、`shouldClose()` 等能力，没有键盘 / 鼠标访问入口
+- [src/infra/window/sdl_window.cpp](../../src/infra/window/sdl_window.cpp) 的 SDL 事件循环只消费 `SDL_EVENT_QUIT`，其余输入事件全部被丢弃
+- [src/core/gpu/engine_loop.cpp](../../src/core/gpu/engine_loop.cpp) 也还没有“输入帧推进”的统一时序
+- `REQ-015` / `REQ-016` 的相机控制器、`REQ-017` 的 ImGui 输入协调都需要一个稳定的 `core` 层输入入口
 
-[Phase 2 REQ-203](../../notes/roadmaps/phase-2-foundation-layer.md) 规划了完整的 `IInputState` 接口（含 `isKeyPressed`/`isKeyReleased` 这种边沿检测 + `nextFrame()` 状态推进）。本 REQ 是 Phase 2 REQ-203 的**最小可用前置版本**：只暴露 Phase 1 调试链路真正需要的字段，避免一次性引入 Phase 2 的全套抽象。Phase 2 落地时再扩展，接口签名兼容。
+[Phase 2 REQ-203](../../notes/roadmaps/phase-2-foundation-layer.md) 规划了更完整的输入系统（含边沿检测、状态推进、扩展设备）。本 REQ 只做它的最小前置版本：先把 `core/` 层的只读输入快照接口立住，让后续 SDL3 实现和相机控制器有共同依赖。
 
-本需求**只**定义 `core/` 层接口，不写任何 SDL 实现 —— 实现见 REQ-013。
+本需求只定义接口、枚举和 dummy/testing helper；不实现 SDL/GLFW 的真实事件读取，不重构主循环。
 
 ## 目标
 
-1. `core/input/` 新增 `key_code.hpp` / `mouse_button.hpp` / `input_state.hpp` 三个 header
-2. `IInputState` 接口涵盖键盘 down / 鼠标 down / 鼠标位置 / 鼠标 delta / 滚轮 delta 五类查询
-3. `Window` 接口新增 `getInputState()` 暴露每帧最新的 input snapshot
-4. 接口签名与 Phase 2 REQ-203 兼容（即 Phase 2 是本 REQ 的超集，不做向后不兼容修改）
+1. 在 `src/core/input/` 下新增最小输入抽象：`KeyCode`、`MouseButton`、`IInputState`
+2. `Window` 接口新增 `getInputState()`，为后续输入实现提供统一入口
+3. 提供一个“全零”的 `DummyInputState`，让当前代码和 headless 测试在没有真实输入实现时也能编译通过
+4. 保持接口签名与 Phase 2 更完整输入系统兼容，不在 Phase 1 提前引入事件流、action map、手柄等范围
 
 ## 需求
 
@@ -32,25 +33,34 @@ namespace LX_core {
 
 enum class KeyCode : uint16_t {
   Unknown = 0,
+
   // 字母
   A, B, C, D, E, F, G, H, I, J, K, L, M,
   N, O, P, Q, R, S, T, U, V, W, X, Y, Z,
+
   // 数字
   Num0, Num1, Num2, Num3, Num4, Num5, Num6, Num7, Num8, Num9,
+
   // 控制键
   Escape, Space, LShift, RShift, LCtrl, RCtrl, LAlt, RAlt, Enter, Tab,
+
   // 方向
   Left, Right, Up, Down,
-  // 功能键（先到 F4，足够 Phase 1 调试）
+
+  // 功能键（Phase 1 只先到 F4）
   F1, F2, F3, F4,
 
   Count
 };
 
-}
+} // namespace LX_core
 ```
 
-不在本 REQ 范围：F5-F12 / 小键盘 / 国际键盘扩展键。Phase 2 REQ-203 扩。
+不在本 REQ 范围：
+
+- F5-F12
+- 数字小键盘
+- 国际键盘扩展键
 
 ### R2: `MouseButton` 枚举
 
@@ -66,7 +76,7 @@ enum class MouseButton : uint8_t {
   Count  = 3,
 };
 
-}
+} // namespace LX_core
 ```
 
 ### R3: `IInputState` 接口
@@ -86,7 +96,6 @@ public:
   virtual ~IInputState() = default;
 
   // ---- 键盘 ----
-  /// 当前是否按住。
   virtual bool isKeyDown(KeyCode code) const = 0;
 
   // ---- 鼠标按键 ----
@@ -95,55 +104,54 @@ public:
   // ---- 鼠标位置（窗口客户区像素坐标，左上为 0,0）----
   virtual Vec2f getMousePosition() const = 0;
 
-  /// 自上一帧到本帧的鼠标移动量（像素）。
-  /// REQ-013 的实现会在每帧 nextFrame() 时累计 delta。
+  // ---- 自上一输入帧累计的鼠标位移 ----
   virtual Vec2f getMouseDelta() const = 0;
 
-  // ---- 滚轮 ----
-  /// 自上一帧累计的滚轮 delta（垂直方向，+1 = 上滚一格）。
+  // ---- 自上一输入帧累计的滚轮位移 ----
   virtual float getMouseWheelDelta() const = 0;
 
   // ---- 帧推进 ----
-  /// 由 Window::pollEvents 在每帧末尾调用，清零 per-frame delta（mouse / wheel）。
-  /// 不清键盘 / 鼠标按键的 down 状态。
+  /// 清理由具体实现定义为 per-frame 的累计量。
+  /// 本 REQ 只定义接口，不规定调用时机；实际时序由 REQ-013 决定。
   virtual void nextFrame() = 0;
 };
 
 using InputStatePtr = std::shared_ptr<IInputState>;
 
-}
+} // namespace LX_core
 ```
 
-**接口的故意省略**（与 Phase 2 REQ-203 的差异）：
+本接口故意省略：
 
-- 没有 `isKeyPressed` / `isKeyReleased`（边沿检测）—— Phase 2 加。Phase 1 的相机控制器只用 down 状态足够
-- 没有 `Modifier` 复合键查询 —— 用 `isKeyDown(LShift)` 自己组合
-- 没有事件订阅式回调（observer pattern）—— polling 状态足够 Phase 1
-- 没有手柄 —— Phase 2 REQ-204
+- `isKeyPressed` / `isKeyReleased`
+- `Modifier` 复合键查询
+- 事件订阅 / observer pattern
+- 文本输入
+- 手柄输入
+
+这些都留给后续更完整的输入系统。
 
 ### R4: `Window` 接口扩展
 
-修改 `src/core/platform/window.hpp:8`：
+修改 `src/core/platform/window.hpp`，新增：
 
 ```cpp
-class Window {
-public:
-  // ...现有方法保持不变...
-
-  /// 返回该 Window 持有的 input state 快照。
-  /// 同一个 Window 实例返回的是同一个 InputState，不要重复 cache。
-  /// REQ-013 的 SDL 实现在 shouldClose() / pollEvents() 内部更新这个快照。
-  virtual InputStatePtr getInputState() const = 0;
-};
+virtual InputStatePtr getInputState() const = 0;
 ```
 
-注意：本 REQ 只增 `getInputState()` 一个虚方法，不动 `shouldClose` / `onClose` 的现有签名。
+行为约束：
 
-### R5: dummy implementation 用于 headless 测试
+- 同一个 `Window` 实例多次调用 `getInputState()`，返回的应当是同一个共享输入对象
+- 本 REQ 不新增 `pollEvents()`、不新增 `Window::nextFrame()`、不修改 `shouldClose()` / `onClose()` 契约
+- SDL / GLFW 在本 REQ 中只需返回 dummy 占位输入状态，真实事件更新留给 `REQ-013`
 
-新建 `src/core/input/dummy_input_state.hpp`，提供一个 `IInputState` 的"全零"实现：
+### R5: `DummyInputState`
+
+新建 `src/core/input/dummy_input_state.hpp`，提供一个 `IInputState` 的全零实现：
 
 ```cpp
+namespace LX_core {
+
 class DummyInputState : public IInputState {
 public:
   bool isKeyDown(KeyCode) const override { return false; }
@@ -153,19 +161,43 @@ public:
   float getMouseWheelDelta() const override { return 0.0f; }
   void nextFrame() override {}
 };
+
+} // namespace LX_core
 ```
 
 用途：
 
-- 让 `RenderQueue` / FrameGraph 这类不需要输入的集成测试能注入一个空 input state
-- 让 REQ-015 / REQ-016 的 controller 单元测试可以构造确定性 input
+- 当前 SDL / GLFW window 实现的临时占位返回值
+- 不依赖真实输入的集成测试
+- 后续相机控制器测试的最简空输入
+
+### R6: `infra/window` 的占位适配
+
+虽然本 REQ 不实现真实输入，但为保持 `Window` 新纯虚接口可编译，当前 window 实现必须同步提供占位实现：
+
+- `src/infra/window/window.hpp` 增加 `getInputState() const override`
+- `src/infra/window/sdl_window.cpp` 与 `src/infra/window/glfw_window.cpp` 持有一个 `DummyInputState`
+- `getInputState()` 返回该共享对象
+
+约束：
+
+- 不在本 REQ 中读取任何 SDL / GLFW 键鼠事件
+- 不在本 REQ 中修改 SDL `shouldClose()` 的行为
+- 不在本 REQ 中引入新的窗口事件分发入口
 
 ## 测试
 
-- 新建 `src/test/integration/test_input_state.cpp`：
-  - 测试 `DummyInputState` 所有 getter 返回零值
-  - 测试 `KeyCode::Count` / `MouseButton::Count` 枚举值不被使用作真实 key
-  - 不测试 SDL 实现（那是 REQ-013 的事）
+新增 `src/test/integration/test_input_state.cpp`，至少覆盖：
+
+- `DummyInputState` 的所有 getter 返回零值
+- `DummyInputState::nextFrame()` 可调用且不改变零值语义
+- `KeyCode::Count` / `MouseButton::Count` 只作为边界值存在，不应被当作真实输入码使用
+
+不在本 REQ 中测试：
+
+- SDL 真实事件处理
+- GLFW 真实事件处理
+- 主循环中的输入时序
 
 ## 修改范围
 
@@ -176,34 +208,39 @@ public:
 | `src/core/input/input_state.hpp` | 新增 |
 | `src/core/input/dummy_input_state.hpp` | 新增 |
 | `src/core/platform/window.hpp` | 新增 `getInputState()` 纯虚方法 |
-| `src/core/CMakeLists.txt` | 把新增 header 加入 install / public include |
+| `src/core/CMakeLists.txt` | 把新增头文件纳入导出/构建可见范围 |
 | `src/infra/window/window.hpp` | 同步声明 `getInputState() override` |
-| `src/infra/window/sdl_window.cpp` / `window_impl_glfw.cpp` | **临时** stub 返回 `DummyInputState`（保持编译通过；真实实现见 REQ-013） |
+| `src/infra/window/sdl_window.cpp` | 返回 `DummyInputState` 占位实现 |
+| `src/infra/window/glfw_window.cpp` | 返回 `DummyInputState` 占位实现 |
 | `src/test/integration/test_input_state.cpp` | 新增 |
-| `src/test/integration/CMakeLists.txt` | 注册新测试 |
+| `src/test/CMakeLists.txt` | 注册新测试 |
 
 ## 边界与约束
 
-- **不实现 SDL/GLFW 真正的事件读取** —— 那是 REQ-013
-- **不做边沿检测**（isKeyPressed / isKeyReleased）—— Phase 2 REQ-203 加
-- **不做 action mapping** —— Phase 2 REQ-205
-- 不动 `shouldClose` / `onClose` 现有契约
-- `getInputState()` 必须保证多次调用返回同一对象（`shared_ptr` 同 ptr），让相机控制器可以提前 cache
+- 不实现 SDL/GLFW 的真实输入读取
+- 不新增 `Window::nextFrame()` 或 `pollEvents()` 一类新接口
+- 不做边沿检测
+- 不做 action mapping
+- 不做文本输入
+- 不做手柄支持
+- 不改 `shouldClose()` / `onClose()` 的现有契约
 
 ## 依赖
 
-- 无（纯接口添加）
+- 无
 
 ## 下游
 
-- **REQ-013**：SDL3 实现填进去
-- **REQ-015 / REQ-016**：相机控制器持有 `InputStatePtr`
-- **REQ-017**：ImGui 输入 forwarding 走同一个 input state
-- **Phase 2 REQ-203**：在本 REQ 接口上扩 isKeyPressed / isKeyReleased / Modifier / nextFrame 语义增强
+- `REQ-013`：SDL3 的真实输入实现填充到本接口背后
+- `REQ-015` / `REQ-016`：相机控制器读取 `IInputState`
+- `REQ-017`：ImGui 输入协调复用同一抽象层
+- Phase 2 更完整输入系统：在本接口上扩充边沿检测、设备类型与状态推进语义
 
 ## 实施状态
 
-2026-04-16 核查结果：未开始。
+2026-04-16 实施完成。
 
-- 还没有 `core/input/` 抽象
-- `Window` 也还没有 `getInputState()`
+- `src/core/input/` 已创建：`key_code.hpp`、`mouse_button.hpp`、`input_state.hpp`、`dummy_input_state.hpp`
+- `Window` 已新增 `getInputState()` 纯虚方法
+- SDL / GLFW window 实现已返回 `DummyInputState` 占位
+- `test_input_state` 集成测试已通过（7 个测试函数）

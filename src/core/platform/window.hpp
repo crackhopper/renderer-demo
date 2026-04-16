@@ -1,4 +1,5 @@
 #pragma once
+#include "core/input/input_state.hpp"
 #include "core/platform/types.hpp"
 #include <functional>
 #include <memory>
@@ -31,6 +32,8 @@ public:
   // 辅助销毁方法（因为 Surface 必须在 Instance 销毁前销毁）
   virtual void destroyGraphicsHandle(GraphicsAPI api, GraphicsInstanceHandle instance,
                                      WindowGraphicsHandle handle) const = 0;
+
+  virtual InputStatePtr getInputState() const = 0;
 
   virtual void onClose(std::function<void()> cb) = 0;
   virtual bool shouldClose() = 0;

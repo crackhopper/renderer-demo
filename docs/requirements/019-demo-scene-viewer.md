@@ -1,42 +1,40 @@
-# REQ-019: demo_scene_viewer 集成 demo
+# REQ-019: `demo_scene_viewer` 集成入口
 
 ## 背景
 
-REQ-010 至 REQ-018 各自交付了一块基础设施，但没有一个最终的"集成入口"把它们装到一起跑起来。现状的 `src/test/test_render_triangle.cpp:34` 是一个极简的"画一个三角形"的硬编码 demo，**不**适合：
+`REQ-010` 到 `REQ-018` 分别定义了资产目录、glTF 读取、输入抽象、SDL 输入、时钟、相机控制器、ImGui overlay 和 debug UI helper，但这些能力目前还没有被收敛到一个真正面向人类调试的可运行入口中。
 
-- 加载 REQ-010 的 PBR 资产（写满 OBJ + 没有相机交互）
-- 试 REQ-015 / REQ-016 的相机控制器
-- 显示 REQ-017 / REQ-018 的 ImGui panel
-- 作为 Phase 1 后续 REQ-101+ 的"基底"持续演进
+当前仓库状态（2026-04-16 核查）：
 
-本需求把上面 9 个 REQ 整合到一个**面向人类调试**的 demo —— `demo_scene_viewer`。它的定位：
+- [src/main.cpp](../../src/main.cpp) 目前只是 `int main() { return 0; }`
+- `EngineLoop` 已经实际存在于 [src/core/gpu/engine_loop.hpp](../../src/core/gpu/engine_loop.hpp) / [engine_loop.cpp](../../src/core/gpu/engine_loop.cpp)，`REQ-020` 已完成
+- 还没有 `src/demos/` 目录
+- 还没有一个同时覆盖资产加载、相机交互、ImGui 调试 UI 的默认 demo
 
-- **不是** 集成测试（不在 ctest 里跑，不卡 CI）
-- **不是** tutorial 示例（不教学，假设读者已经懂引擎 API）
-- **是** Phase 1 后续每个新 REQ（REQ-101 ~ REQ-110）的**默认开发入口**：新增一个 pass / 新材质 / 新后期效果，第一站就是把它接进 `demo_scene_viewer` 跑通
+因此，`REQ-019` 的职责不是“再定义一套主循环”，而是把前置能力接入一个基于 `EngineLoop` 的 scene viewer，作为 Phase 1 后续渲染功能开发的默认人工调试入口。
 
-REQ-020 引入 `EngineLoop` 之后，本 demo 不再把 `Window + Renderer + while(running)` 直接摊在 `main.cpp` 里，而是作为 `EngineLoop` 的首个完整集成入口。
+这个 demo 的定位是：
+
+- 不是 CI 测试
+- 不是 tutorial 示例
+- 是后续渲染功能的默认集成 playground
 
 ## 目标
 
-1. 新建 `src/demos/` 顶层目录（与 `src/test/` 平行）
-2. `demo_scene_viewer` 加载 DamagedHelmet + 一块地面 plane + 默认 directional light
-3. 默认 OrbitCameraController，按 F2 切换 FreeFlyCameraController
-4. ImGui debug panel 显示 render stats + camera + light，可编辑参数
-5. CMake 注册为独立 target，独立于 ctest
-6. 覆盖 REQ-010 ~ REQ-018 所有交付项的最小整合路径
-
-## 依赖
-
-- **REQ-020**（必需）：提供 `EngineLoop` 作为 demo 的运行骨架
+1. 新建 `demo_scene_viewer`，作为默认集成 demo
+2. 基于 `EngineLoop` 组织运行，而不是手写裸 `while` 主循环
+3. 加载 `DamagedHelmet`，并提供一个最小地面与默认方向光
+4. 默认启用 Orbit，相机可切换到 FreeFly
+5. 接入 ImGui overlay 与 `debug_ui` helper
+6. 作为后续 Sponza / shadow / IBL / post-process 的扩展基底
 
 ## 需求
 
-### R1: `src/demos/` 目录约定
+### R1: 新建 demo 目录
 
-新建：
+新增：
 
-```
+```text
 src/demos/
 ├── CMakeLists.txt
 └── scene_viewer/
@@ -45,255 +43,183 @@ src/demos/
     └── README.md
 ```
 
-`README.md` 写明：
+说明：
 
-- demo 的目的（Phase 1 prereq 集成入口）
-- 依赖的 REQ 列表
-- 启动方式（命令行 + 环境变量 LX_RENDER_DEBUG）
-- 控制说明（鼠标 / 键盘 / F1 / F2 / F4）
-- 已知限制
+- `scene_viewer` 是本仓库第一个正式 demo
+- 后续若新增更多 demo，继续放在 `src/demos/` 下
+- demo 不进入 `src/test/`
 
-### R2: main 流程
+### R2: 运行骨架必须基于 `EngineLoop`
 
-`src/demos/scene_viewer/main.cpp`（不超过 150 行）：
+`REQ-020` 已经完成，因此本 REQ 明确要求 `demo_scene_viewer` 通过 `EngineLoop` 运行。
 
-```cpp
-int main() {
-  // 1. 工作目录
-  if (!cdToWhereAssetsExist("models/damaged_helmet/DamagedHelmet.gltf")) {
-    std::cerr << "asset not found, run from repo root or build dir\n";
-    return 1;
-  }
+主流程至少包含：
 
-  // 2. window + renderer
-  LX_infra::Window::Initialize();
-  auto window = std::make_shared<LX_infra::Window>("scene_viewer", 1280, 720);
-  auto renderer = std::make_shared<LX_core::backend::VulkanRenderer>(/*token*/{});
-  renderer->initialize(window, "scene_viewer");
+1. 调用 `cdToWhereAssetsExist(...)` 定位资产根
+2. 创建 `Window`
+3. 创建 `VulkanRenderer`
+4. 调用 `renderer->initialize(window, "demo_scene_viewer")`
+5. 创建并填充 `Scene`
+6. 创建 `EngineLoop`
+7. `loop.initialize(window, renderer)`
+8. `loop.startScene(scene)`
+9. 注册 update hook
+10. `loop.run()`
 
-  // 3. 加载 DamagedHelmet
-  GLTFLoader loader;
-  loader.load("assets/models/damaged_helmet/DamagedHelmet.gltf");
-  auto helmetMesh = buildMeshFromGltf(loader);             // 见 R3
+约束：
 
-  // 4. 临时材质：把 GLTF baseColor / normal / metallicRoughness 路径喂给现有 BlinnPhong loader
-  auto material = LX_infra::loadBlinnPhongMaterial();
-  applyGltfTexturesIfAvailable(material, loader.getMaterial());  // 见 R4
-  material->updateUBO();
+- 不再把 demo 文档写成裸 `while (running) { uploadData(); draw(); }`
+- `Clock` 读取以 `EngineLoop::getClock()` 为准
+- 业务更新逻辑通过 `EngineLoop::setUpdateHook(...)` 接入
 
-  auto helmetRenderable = std::make_shared<RenderableSubMesh>(
-      helmetMesh, material, Skeleton::create({}));
+### R3: 资产与场景基线
 
-  // 5. 地面 plane（两个三角形，复用 BlinnPhong）
-  auto groundRenderable = makeGroundPlane();               // 见 R5
+首版 `demo_scene_viewer` 的默认场景至少包含：
 
-  // 6. 场景
-  auto scene = Scene::create(helmetRenderable);
-  scene->addRenderable(groundRenderable);
+1. `DamagedHelmet`
+2. 一块地面 plane
+3. 默认方向光
+4. `Scene` 自带默认相机
 
-  auto camera = scene->getCameras().front();
-  camera->aspect = 1280.0f / 720.0f;
-  auto dirLight = std::dynamic_pointer_cast<DirectionalLight>(scene->getLights().front());
-  dirLight->ubo->param.dir = {-0.4f, -1.0f, -0.3f, 0.0f};
-  dirLight->ubo->param.color = {1.0f, 1.0f, 1.0f, 1.0f};
-  dirLight->ubo->setDirty();
+资产定位要求：
 
-  // 7. controllers
-  auto orbit = std::make_shared<OrbitCameraController>(Vec3f{0, 0, 0}, 4.0f);
-  auto freefly = std::make_shared<FreeFlyCameraController>(Vec3f{0, 1, 4});
-  ICameraController* activeCtrl = orbit.get();
+- 必须先调用 `cdToWhereAssetsExist("models/damaged_helmet/DamagedHelmet.gltf")`
+- 然后以 `assets/models/damaged_helmet/DamagedHelmet.gltf` 作为加载路径
 
-  // 8. EngineLoop
-  EngineLoop loop;
-  loop.initialize(window, renderer);
-  loop.startScene(scene);
+首版不要求一上来就加载 `Sponza`。`Sponza` 应作为后续扩展目标，而不是本 REQ 的首批验收必选项。
 
-  // 9. ImGui callback
-  bool showHelp = true;
-  renderer->setDrawUiCallback([&]() {
-    debug_ui::renderStatsPanel(loop.getClock());
-    debug_ui::cameraPanel("Camera", *camera);
-    debug_ui::directionalLightPanel("Sun", *dirLight);
-    if (showHelp) {
-      if (debug_ui::beginPanel("Help")) {
-        ImGui::TextUnformatted("F1: toggle this help");
-        ImGui::TextUnformatted("F2: switch Orbit / FreeFly");
-        ImGui::TextUnformatted("RMB drag: look (FreeFly) / pan (Orbit)");
-        ImGui::TextUnformatted("WASD + Space/LShift: move (FreeFly)");
-        ImGui::TextUnformatted("LMB drag + wheel: orbit (Orbit)");
-      }
-      debug_ui::endPanel();
-    }
-  });
+### R4: glTF 几何与材质桥接是 demo 内部 glue
 
-  // 10. 业务 update hook
-  bool prevF2 = false;
-  bool prevF1 = false;
-  loop.setUpdateHook([&](Scene& scene, const Clock& clock) {
-    auto& input = *window->getInputState();
+本 REQ 依赖 `REQ-011` 提供：
 
-    // F1 toggle help
-    bool curF1 = input.isKeyDown(KeyCode::F1);
-    if (curF1 && !prevF1) showHelp = !showHelp;
-    prevF1 = curF1;
+- `GLTFLoader` 读取 `DamagedHelmet.gltf`
+- positions / normals / uv / indices
+- 可选 tangent
+- 基础 PBR 贴图元数据
 
-    // F2 toggle camera mode
-    bool curF2 = input.isKeyDown(KeyCode::F2);
-    if (curF2 && !prevF2) {
-      activeCtrl = (activeCtrl == orbit.get())
-                       ? static_cast<ICameraController*>(freefly.get())
-                       : orbit.get();
-    }
-    prevF2 = curF2;
+但当前正式材质入口仍是 generic material asset loader，而不是完整 PBR 材质系统。因此本 demo 允许包含少量“过渡 glue”：
 
-    activeCtrl->update(*camera, input, clock.deltaTime());
-    camera->updateMatrices();
-  });
+1. `buildMeshFromGltf(loader)`
+- 把 `GLTFLoader` 输出拼成当前工程可消费的 mesh / vertex buffer / index buffer
+- 若 tangent 不存在，可用占位值
 
-  // 11. 运行
-  loop.run();
-}
-```
+2. `makeHelmetMaterial(...)`
+- 基于现有 `.material` 资产，例如 `materials/blinnphong_default.material` 或同类材质，调用 `LX_infra::loadGenericMaterial(...)`
+- 根据 `GLTFPbrMaterial` 中可用的贴图路径，把 baseColor / normal 等资源尽量桥接到当前材质绑定
+- 当前材质不支持的字段可以跳过
 
-边沿检测（F1 / F2 toggle）在 demo 里手写，不依赖 REQ-012 的边沿 API（那是 Phase 2）。
-`main.cpp` 仍然允许保留少量“展开式”逻辑（例如 GLTF glue code），但主循环的编排必须收敛到 `EngineLoop`，不再手写 `while (...) { uploadData(); draw(); }`。
+约束：
 
-### R3: `buildMeshFromGltf(loader)` helper
+- 这些 helper 属于 demo glue，不要求沉入 `infra/`
+- 本 REQ 不要求引入真正的 PBR material loader
+- demo 内部桥接逻辑可以先服务于 `DamagedHelmet`，不追求完全泛化
 
-在 `src/demos/scene_viewer/main.cpp` 内（或拆出一个 `gltf_to_mesh.hpp`）：
+### R5: Renderable 路径优先兼容当前主模型
 
-```cpp
-static MeshPtr buildMeshFromGltf(const GLTFLoader& loader) {
-  // 把 positions / normals / texCoords / tangents 拼成 VertexPosNormalUvBone
-  // bone weight 全置零（DamagedHelmet 没有骨骼）
-  // 索引直接复用 loader.getIndices()
-  std::vector<VertexPosNormalUvBone> vertices;
-  vertices.reserve(loader.getPositions().size());
-  for (size_t i = 0; i < loader.getPositions().size(); ++i) {
-    vertices.emplace_back(
-        loader.getPositions()[i],
-        loader.getNormals()[i],
-        loader.getTexCoords()[i],
-        Vec4f{1, 0, 0, 1}, /* tangent placeholder if not present */
-        std::array<int, 4>{0, 0, 0, 0},
-        Vec4f{1, 0, 0, 0}
-    );
-  }
-  auto vb = VertexBuffer<VertexPosNormalUvBone>::create(vertices);
-  auto ib = IndexBuffer::create(loader.getIndices());
-  return Mesh::create(vb, ib);
-}
-```
+当前仓库同时存在：
 
-如果 REQ-011 实现的 `getTangents()` 返回非空，把第 4 个参数从 placeholder 替换成真实 tangent。
+- `SceneNode`：推荐主路径
+- `RenderableSubMesh`：仍存在，但后续需求已将其标为 legacy
 
-### R4: `applyGltfTexturesIfAvailable(material, gltfMat)` helper
+因此本 REQ 的要求是：
 
-```cpp
-static void applyGltfTexturesIfAvailable(MaterialPtr mat,
-                                         const GLTFPbrMaterial& gltfMat) {
-  // 如果 baseColorTexture 非空 → 加载到 material 的 albedoMap slot
-  // metallicRoughness / normal / emissive 同理
-  // 没对应 slot 的（比如现在的 BlinnPhong 没有 metallicRoughness）→ skip
-  // 用 setInt("enableNormal", 1) 之类的 toggle 启用对应分支
-  // 找不到任何贴图时退回 base color factor
-}
-```
+- demo 应优先尝试使用 `SceneNode`
+- 若在落地过程中因为现有 mesh/material glue 限制需要暂时使用 `RenderableSubMesh`，允许作为过渡实现
+- 但文档不得再把 `RenderableSubMesh` 写成长期推荐对象模型
 
-这个 helper 是 REQ-019 的"过渡胶水"，存在的原因是当前材质系统是 BlinnPhong 不是 PBR。一旦 Phase 1 REQ-101+ 引入真正的 PBR material loader，这个 helper 会被替换为 `LX_infra::loadGltfPbrMaterial(loader.getMaterial())`，所以本 REQ 把它放在 demo 内部而不是 `infra/loaders/`，避免污染。
+### R6: 相机交互
 
-### R5: `makeGroundPlane()` helper
+`demo_scene_viewer` 至少接入两种控制器：
 
-构造一个 10×10 的 quad（两个三角形），法线向上，UV 0..1。复用 BlinnPhong material（不同的 instance，不同贴图或纯色）。提供阴影投射的接收面，未来 REQ-103 直接用。
+1. `OrbitCameraController`
+2. `FreeFlyCameraController`
 
-### R6: CMake target
+交互要求：
 
-`src/demos/scene_viewer/CMakeLists.txt`：
+- 默认模式为 Orbit
+- 按 `F2` 在 Orbit / FreeFly 间切换
+- 相机每帧在 update hook 中更新
+- 调用方负责在 controller 更新后执行 `camera.updateMatrices()`
+
+说明：
+
+- `F1` 可用于显示/隐藏帮助 panel
+- 切换键的边沿检测允许在 demo 中手写，不要求先引入新的输入边沿抽象
+
+### R7: ImGui 与 debug UI 接入
+
+本 REQ 依赖：
+
+- `REQ-017`：`VulkanRenderer` 已支持 ImGui overlay 与 `setDrawUiCallback(...)`
+- `REQ-018`：已有 `LX_infra::debug_ui::*`
+
+demo 中的 UI 至少包括：
+
+1. Render Stats panel
+2. Camera panel
+3. Directional Light panel
+4. 一个 Help panel
+
+Help panel 至少说明：
+
+- `F1`：显示/隐藏帮助
+- `F2`：切换 Orbit / FreeFly
+- Orbit 的鼠标操作
+- FreeFly 的鼠标/键盘操作
+
+### R8: CMake 接入
+
+新增：
+
+- `src/demos/CMakeLists.txt`
+- `src/demos/scene_viewer/CMakeLists.txt`
+
+顶层 [CMakeLists.txt](../../CMakeLists.txt) 需要接入 `src/demos/`，方式应与当前仓库结构一致：
 
 ```cmake
-add_executable(demo_scene_viewer main.cpp)
-target_link_libraries(demo_scene_viewer
-  PRIVATE
-    lx_core
-    lx_infra
-    lx_backend_vulkan
-)
-target_compile_features(demo_scene_viewer PRIVATE cxx_std_20)
+option(LX_BUILD_DEMOS "Build demo executables" ON)
+
+if(LX_BUILD_DEMOS)
+  add_subdirectory(src/demos)
+endif()
 ```
 
-`src/demos/CMakeLists.txt`：
+说明：
 
-```cmake
-add_subdirectory(scene_viewer)
-```
+- 当前仓库没有 `src/CMakeLists.txt`，因此不能把 demo 注册写到不存在的路径里
+- `demo_scene_viewer` 不属于 ctest
+- demo target 应链接 `${CORE_LIB}`、`${INFRA_LIB}`、`${GRAPHICS_LIB}` 或与当前顶层构建变量等价的真实库名
 
-顶层 `src/CMakeLists.txt`：
+### R9: README
 
-```cmake
-add_subdirectory(demos)
-```
+`src/demos/scene_viewer/README.md` 至少包含：
 
-**不**注册为 ctest（demo 需要窗口 + 用户交互，不适合 CI）。
-**不**默认编译：用一个 `LX_BUILD_DEMOS` cmake option 守护，默认 `ON`，可关闭。
+1. demo 目的
+2. 依赖的前置需求
+3. 构建与运行方式
+4. 控制说明
+5. 已知限制
 
-### R7: README
+已知限制至少包括：
 
-`src/demos/scene_viewer/README.md`：
+- 当前材质桥接仍是过渡方案，不是完整 PBR
+- ImGui 当前是 overlay，不在 FrameGraph 中
+- GLFW 路径不是主线；首版以 SDL 为准
+- 首版场景以 `DamagedHelmet` 为主，不强制包含 `Sponza`
 
-```markdown
-# demo_scene_viewer
+## 验收
 
-Phase 1 渲染开发的默认入口 demo。
+本 REQ 不要求自动化测试；验收以人工运行为主。
 
-## 它做什么
+最小验收清单：
 
-- 加载 `assets/models/damaged_helmet/DamagedHelmet.gltf` + 一块地面 plane
-- 用 OrbitCamera / FreeFlyCamera 两种风格观察
-- ImGui panel 显示 / 编辑 camera + light + render stats
-
-## 控制
-
-| 操作 | 行为 |
-|---|---|
-| 左键拖（Orbit 模式） | 围绕 helmet 旋转 |
-| 右键拖（Orbit 模式） | 平移 target |
-| 滚轮（Orbit 模式） | 缩放 |
-| WASD（FreeFly 模式） | 前后左右 |
-| Space / LShift（FreeFly 模式） | 上 / 下 |
-| 右键拖（FreeFly 模式） | 鼠标 look |
-| LCtrl 按住（FreeFly 模式） | 加速 |
-| F1 | 显示/隐藏帮助 |
-| F2 | 在 Orbit / FreeFly 间切换 |
-
-## 启动
-
-\`\`\`bash
-cd build
-ninja demo_scene_viewer
-./src/demos/scene_viewer/demo_scene_viewer
-\`\`\`
-
-## 已知限制
-
-- 当前 material 走 BlinnPhong，不是真正的 PBR —— 等 Phase 1 REQ-101+
-- ImGui 是 overlay 模式，不在 FrameGraph 里 —— REQ-017 的边界
-- 鼠标右键 look 时鼠标不锁定 —— REQ-016 的边界
-- 没有 shadow map / IBL —— REQ-103 / REQ-105 / REQ-106 之后
-```
-
-## 测试
-
-- **不写自动化测试** —— demo 是人手交互的，集成测试覆盖率由前 9 个 REQ 各自的测试承担
-- 验收方式：
-
-  1. 启动 `demo_scene_viewer`，看到窗口、看到 helmet（带贴图）、看到地面
-  2. 鼠标左键拖动相机围绕 helmet 旋转
-  3. 滚轮缩放
-  4. F2 切换到 FreeFly，WASD 漫游不卡
-  5. ImGui Render Stats panel 显示 ~60 FPS
-  6. 拖动 ImGui Camera panel 的 fovY slider 看到画面变化
-  7. 拖动 Sun panel 的方向，看到 helmet 上的高光区域跟着移动
-  8. 关闭窗口，无崩溃
+1. 能成功启动 `demo_scene_viewer`
+2. 能看到 `DamagedHelmet` 和地面
+3. Orbit 模式可正常旋转/缩放/平移
+4. `F2` 可切换到 FreeFly，且移动正常
+5. ImGui panel 正常显示
+6. Camera / Light 面板修改后，画面会产生可见变化
+7. 关闭窗口时无崩溃
 
 ## 修改范围
 
@@ -303,43 +229,40 @@ ninja demo_scene_viewer
 | `src/demos/scene_viewer/CMakeLists.txt` | 新增 |
 | `src/demos/scene_viewer/main.cpp` | 新增 |
 | `src/demos/scene_viewer/README.md` | 新增 |
-| `src/CMakeLists.txt` | 加 `add_subdirectory(demos)` |
-| 顶层 `CMakeLists.txt` | 加 `option(LX_BUILD_DEMOS "Build demo executables" ON)` |
+| `CMakeLists.txt` | 新增 `LX_BUILD_DEMOS` 选项并接入 `src/demos` |
 
 ## 边界与约束
 
-- **不写** automated test —— demo 是 Phase 1 的人工调试入口，不属于 CI 验证范围
-- **不实现** PBR material loader —— 桥接到现有 BlinnPhong；真正的 PBR loader 是后续 REQ
-- **不实现** shadow / IBL / bloom —— 留给 REQ-103 ~ REQ-110
-- **不引入** scene 序列化 / hot reload —— Phase 3
-- demo main 函数 ≤ 150 行，超过的话拆成 helper 函数（同文件内或 `src/demos/scene_viewer/` 子文件）
-- 只支持 SDL3 backend —— GLFW backend 走 dummy input，跑起来相机不动
+- 不要求自动化测试
+- 不要求完整 PBR 材质系统
+- 不要求首版支持 `Sponza`
+- 不要求引入 scene 序列化、热重载、编辑器框架
+- `main.cpp` 应保持可读；若 glue 过多，拆到 `scene_viewer/` 子文件中
+- 主线以 SDL backend 为准
 
 ## 依赖
 
-按顺序，必须**全部**已合入：
-
-- **REQ-010**：DamagedHelmet 资产 + `cdToWhereAssetsExist`
-- **REQ-011**：`GLTFLoader` 真正能加载 DamagedHelmet
-- **REQ-012**：`IInputState` 接口
-- **REQ-013**：SDL3 真实输入
-- **REQ-014**：`Clock` 提供 deltaTime
-- **REQ-015**：`OrbitCameraController`
-- **REQ-016**：`FreeFlyCameraController`
-- **REQ-017**：ImGui overlay 接入 VulkanRenderer
-- **REQ-018**：`debug_ui` helper
-
-任何一个 REQ 缺失 demo 都跑不起来或编译失败 —— 因此本 REQ 是整个前置链的最末端。
+- `REQ-010`：资产目录与 `cdToWhereAssetsExist()`
+- `REQ-011`：`GLTFLoader` 可读取 `DamagedHelmet`
+- `REQ-012`：输入抽象
+- `REQ-013`：SDL 真实输入
+- `REQ-014`：`Clock`
+- `REQ-015`：Orbit 控制器
+- `REQ-016`：FreeFly 控制器
+- `REQ-017`：ImGui overlay
+- `REQ-018`：`debug_ui` helper
+- `REQ-020`：`EngineLoop` 已完成并作为本 REQ 的正式运行骨架
 
 ## 下游
 
-- **REQ-101 ~ REQ-110**（Phase 1 渲染深度）：每个新 pass / 新材质 / 新后期效果首先在 `demo_scene_viewer` 里跑通再算落地。Sponza 加载 / shadow map / IBL / bloom / FXAA 都会扩展本 demo 的代码
-- **Phase 2 REQ-208**：FreeFly 完整版（带 ActionMap + 手柄）会替换 REQ-016 的 controller，本 demo 直接受益
-- **Phase 2 REQ-210**：dump API 可以接到本 demo 的 ImGui panel，作为 `describe()` 的第一个消费者
+- 后续 `Sponza` 场景扩展
+- shadow / IBL / post-process 等渲染功能集成
+- 更完整的材质与场景调试面板
 
 ## 实施状态
 
 2026-04-16 核查结果：未开始。
 
-- 目前仍只有 `src/test/test_render_triangle.cpp`
-- 尚无 `src/demos/scene_viewer/`
+- 当前只有占位的 [src/main.cpp](../../src/main.cpp)
+- 还没有 `src/demos/`
+- `demo_scene_viewer` 尚不存在

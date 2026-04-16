@@ -2,27 +2,32 @@
 
 ## 背景
 
-REQ-015 提供的 OrbitCameraController 适合"围着一个模型转"，但调试 Sponza 这类**大型场景**时需要在内部走动观察阴影边缘 / 光照衰减 / culling 行为，这是 OrbitCamera 做不到的 —— 必须有 FPS 风格的 **自由飞行相机**：WASD 控制位移、鼠标右键按住时进入鼠标 look。
+OrbitCamera 适合围绕单个模型调试，但在 Sponza 这类大场景里观察阴影边缘、光照衰减和可见性行为时，需要一套能在场景内部自由移动的相机控制方式。
 
-[Phase 2 REQ-208](../../notes/roadmaps/phase-2-foundation-layer.md) 规划了完整版（带 ActionMap / 手柄支持），本 REQ 是它的**最小可用前置版本**：
+2026-04-16 按当前代码与需求状态核查：
 
-- 写死 WASD / Space / LShift / 鼠标右键 的硬编码 binding（不依赖 ActionMap）
-- 不支持手柄
-- 复用 REQ-015 引入的 `ICameraController` 接口
+- [src/core/scene/camera.hpp](../../src/core/scene/camera.hpp) 的 `Camera` 仍然只是纯数据对象
+- `REQ-012` 的输入抽象已经存在，`Window::getInputState()` 已是正式入口
+- `REQ-014` 的 `Clock` 已能提供 `deltaTime()`，足以支撑基于时间的位移
+- `REQ-015` 已经把 Orbit 的目标形态定义为“先引入 `ICameraController` 与 `MockInputState`”，但这些类型本身尚未落地
+- 仓库里还没有 `FreeFlyCameraController`
+
+本需求的目标是提供一个最小可用的 FPS 风格自由飞行控制器，供后续 demo 场景漫游和大场景调试使用。它不追求完整输入系统，也不引入 action map、手柄、鼠标锁定状态机等更高阶段特性。
 
 ## 目标
 
-1. `core/scene/freefly_camera_controller.hpp` 实现 `ICameraController`
-2. WASD 控制水平位移，Space / LShift 控制垂直
-3. 鼠标右键按住时锁定鼠标视角（mouse look）
-4. 移动速度按 deltaTime 缩放（依赖 REQ-014 的 `Clock`）
-5. LCtrl 按住时进入"加速模式"（移动速度 ×4）
+1. 在 `core/scene/` 中实现 `FreeFlyCameraController`
+2. 复用 `REQ-015` 约定的 `ICameraController` 抽象
+3. 支持 `W/A/S/D` 水平移动、`Space` / `LShift` 垂直移动
+4. 鼠标右键按住时启用 mouse look
+5. 位移严格按 `deltaTime()` 缩放
+6. `LCtrl` 作为加速键
 
 ## 需求
 
 ### R1: `FreeFlyCameraController` 类
 
-新建 `src/core/scene/freefly_camera_controller.hpp` + `.cpp`：
+新建 `src/core/scene/freefly_camera_controller.hpp` 与 `.cpp`：
 
 ```cpp
 #pragma once
@@ -36,22 +41,21 @@ public:
                                    float yawDeg = 180.0f,
                                    float pitchDeg = 0.0f);
 
-  void update(Camera &camera, const IInputState &input, float dt) override;
+  void update(Camera& camera, const IInputState& input, float dt) override;
 
-  // 调试 / DebugPanel 用
   Vec3f getPosition() const { return m_position; }
   float getYawDeg() const { return m_yawDeg; }
   float getPitchDeg() const { return m_pitchDeg; }
-  void  setPosition(Vec3f p) { m_position = p; }
-  void  setYawDeg(float y) { m_yawDeg = y; }
-  void  setPitchDeg(float p) { m_pitchDeg = p; }
 
-  // 灵敏度参数
-  float moveSpeedPerSecond     = 4.0f;   // 单位/秒
-  float boostMultiplier        = 4.0f;   // LCtrl 按住时
-  float lookSpeedDegPerPixel   = 0.15f;  // 鼠标 look
-  float minPitchDeg            = -89.0f;
-  float maxPitchDeg            = 89.0f;
+  void setPosition(Vec3f p) { m_position = p; }
+  void setYawDeg(float y) { m_yawDeg = y; }
+  void setPitchDeg(float p) { m_pitchDeg = p; }
+
+  float moveSpeedPerSecond = 4.0f;
+  float boostMultiplier = 4.0f;
+  float lookSpeedDegPerPixel = 0.15f;
+  float minPitchDeg = -89.0f;
+  float maxPitchDeg = 89.0f;
 
 private:
   Vec3f m_position;
@@ -59,96 +63,95 @@ private:
   float m_pitchDeg;
 };
 
-}
+} // namespace LX_core
 ```
 
-`update` 实现要点：
+说明：
 
-1. **鼠标 look**：仅当 `input.isMouseButtonDown(Right)` 为 true 时
-   - `m_yawDeg   -= input.getMouseDelta().x * lookSpeedDegPerPixel`
-   - `m_pitchDeg -= input.getMouseDelta().y * lookSpeedDegPerPixel`
-   - clamp pitch
-2. 计算 forward / right / up 向量：
-   - `yaw = radians(m_yawDeg)`, `pitch = radians(m_pitchDeg)`
-   - `forward = (cos(pitch)*sin(yaw), sin(pitch), cos(pitch)*cos(yaw))`
-   - `right   = normalize(cross(forward, world_up))`
-   - `up_local = normalize(cross(right, forward))`（世界 up 是 (0,1,0)，做 free-fly 时本地 up 仍接近世界 up）
-3. **键盘位移** —— 累计 movement 向量：
-   - `W` → `+forward`
-   - `S` → `-forward`
-   - `D` → `+right`
-   - `A` → `-right`
-   - `Space` → `+world_up`
-   - `LShift` → `-world_up`
-4. 速度：`speed = moveSpeedPerSecond * (input.isKeyDown(LCtrl) ? boostMultiplier : 1.0f)`
-5. `m_position += movement_normalized * speed * dt`
-   - 注意：归一化 movement 是为了对角线移动不超速（W+D 比 W 单按快 √2）
-6. 写回 camera：
-   - `camera.position = m_position`
-   - `camera.target   = m_position + forward`
-   - `camera.up       = (0, 1, 0)`
+- 控制器内部维护自己的位置和欧拉角状态
+- `Camera` 只是最终写回目标，不反向拥有 controller 状态
 
-`world_up = (0, 1, 0)` 写在文件内匿名 namespace 常量。
+### R2: 更新规则
 
-### R2: 鼠标右键按下时锁定鼠标？
+`update()` 的行为要求：
 
-**本 REQ 不做 SDL 鼠标锁定（`SDL_SetWindowRelativeMouseMode`）**，原因：
+1. 鼠标 look
 
-- 鼠标锁定会让 ImGui（REQ-017）丢失鼠标位置，需要协调
-- 锁定 / 解锁的状态机要和 input state 协调，本 REQ 不动 input state
-- Phase 1 调试场景里"鼠标右键按住时鼠标在屏幕里也能看到"是可接受的妥协
+- 仅当 `input.isMouseButtonDown(MouseButton::Right)` 为 true 时启用
+- `m_yawDeg -= input.getMouseDelta().x * lookSpeedDegPerPixel`
+- `m_pitchDeg -= input.getMouseDelta().y * lookSpeedDegPerPixel`
+- `pitch` clamp 到 `[minPitchDeg, maxPitchDeg]`
 
-留 TODO 注释，REQ-017 / REQ-019 决定是否拉这个 feature。
+2. 朝向基向量
 
-### R3: 单元测试
+- 由 `yaw/pitch` 计算 `forward`
+- 由 `forward` 与世界上方向 `(0,1,0)` 计算 `right`
+- 世界上方向固定为 `(0,1,0)`
 
-新建 `src/test/integration/test_freefly_camera_controller.cpp`：
+3. 键盘位移
 
-```cpp
-TEST(FreeFly, w_key_moves_forward) {
-  Camera cam(ResourcePassFlag::Forward);
-  FreeFlyCameraController ctrl({0, 0, 0}, /*yaw*/0.0f, /*pitch*/0.0f);
-  // yaw=0,pitch=0 → forward = (0,0,1)
-  MockInputState input;
-  input.setKeyDown(KeyCode::W, true);
-  ctrl.update(cam, input, 1.0f);  // dt = 1s
-  EXPECT_NEAR(cam.position.z, ctrl.moveSpeedPerSecond, 1e-3f);
-}
+- `W` → `+forward`
+- `S` → `-forward`
+- `D` → `+right`
+- `A` → `-right`
+- `Space` → `+worldUp`
+- `LShift` → `-worldUp`
 
-TEST(FreeFly, mouse_look_only_with_right_button) {
-  Camera cam(ResourcePassFlag::Forward);
-  FreeFlyCameraController ctrl({0, 0, 0}, 0, 0);
-  MockInputState input;
-  input.setMouseDelta({100, 0});
-  ctrl.update(cam, input, 0.016f);
-  EXPECT_FLOAT_EQ(ctrl.getYawDeg(), 0.0f);  // 没按右键，yaw 不变
+4. 速度
 
-  input.setMouseButtonDown(MouseButton::Right, true);
-  ctrl.update(cam, input, 0.016f);
-  EXPECT_LT(ctrl.getYawDeg(), 0.0f);        // 鼠标向右→yaw 减
-}
+- 基础速度：`moveSpeedPerSecond`
+- 若 `input.isKeyDown(KeyCode::LCtrl)`，速度乘以 `boostMultiplier`
+- 位移量为 `movementNormalized * speed * dt`
 
-TEST(FreeFly, diagonal_movement_does_not_exceed_speed) {
-  Camera cam(ResourcePassFlag::Forward);
-  FreeFlyCameraController ctrl({0, 0, 0}, 0, 0);
-  MockInputState input;
-  input.setKeyDown(KeyCode::W, true);
-  input.setKeyDown(KeyCode::D, true);
-  ctrl.update(cam, input, 1.0f);
-  float dist = std::hypot(cam.position.x, cam.position.z);
-  EXPECT_NEAR(dist, ctrl.moveSpeedPerSecond, 1e-3f);
-}
+5. 写回 camera
 
-TEST(FreeFly, boost_multiplies_speed) {
-  Camera cam(ResourcePassFlag::Forward);
-  FreeFlyCameraController ctrl({0, 0, 0}, 0, 0);
-  MockInputState input;
-  input.setKeyDown(KeyCode::W, true);
-  input.setKeyDown(KeyCode::LCtrl, true);
-  ctrl.update(cam, input, 1.0f);
-  EXPECT_NEAR(cam.position.z, ctrl.moveSpeedPerSecond * ctrl.boostMultiplier, 1e-3f);
-}
-```
+- `camera.position = m_position`
+- `camera.target = m_position + forward`
+- `camera.up = (0, 1, 0)`
+
+约束：
+
+- 对角线移动必须归一化，避免速度变成单轴移动的 `sqrt(2)` 倍
+- 控制器不调用 `camera.updateMatrices()`
+- 若 `dt <= 0`，允许无位移更新，但鼠标 look 逻辑仍可按实现决定是否处理
+
+### R3: 鼠标锁定策略
+
+本 REQ 不做 SDL 相对鼠标模式或鼠标锁定：
+
+- 不调用 `SDL_SetWindowRelativeMouseMode`
+- 不隐藏系统鼠标
+- 不设计“右键按下进入锁定、松开退出”的状态机
+
+原因：
+
+- 这会与 `REQ-017` 的 ImGui 输入协调发生交叉
+- 当前输入系统还没有 UI capture 协调的正式闭环
+- 对 Phase 1 调试来说，“右键按住时用相对 delta 观察”已经足够
+
+留作 `REQ-017` / `REQ-019` 或后续输入增强需求再评估。
+
+### R4: 测试
+
+新增 `src/test/integration/test_freefly_camera_controller.cpp`，至少覆盖：
+
+- `w_key_moves_forward`
+  - `yaw=0,pitch=0` 时，`W` 应让相机沿正前方向移动
+- `mouse_look_only_with_right_button`
+  - 未按右键时鼠标 delta 不改变 yaw/pitch
+  - 按住右键后鼠标 delta 才生效
+- `diagonal_movement_does_not_exceed_speed`
+  - `W + D` 同按时总位移长度仍等于单轴速度
+- `boost_multiplies_speed`
+  - `LCtrl` 按住时移动速度按倍数放大
+- `pitch_is_clamped`
+  - 大幅垂直 mouse look 仍不越界
+
+测试约束：
+
+- 使用 `REQ-015` 中定义的 `MockInputState`
+- 不依赖 SDL window 或真实输入设备
+- 测试注册点为 [src/test/CMakeLists.txt](../../src/test/CMakeLists.txt)
 
 ## 修改范围
 
@@ -156,34 +159,34 @@ TEST(FreeFly, boost_multiplies_speed) {
 |---|---|
 | `src/core/scene/freefly_camera_controller.hpp` | 新增 |
 | `src/core/scene/freefly_camera_controller.cpp` | 新增 |
-| `src/core/CMakeLists.txt` | 把新文件加进 sources |
+| `src/core/CMakeLists.txt` | 如有需要，确保新 `.cpp` 被 `CORE_SOURCES` 收集 |
 | `src/test/integration/test_freefly_camera_controller.cpp` | 新增 |
-| `src/test/integration/CMakeLists.txt` | 注册新测试 |
-
-## 测试
-
-见 R3。
+| `src/test/CMakeLists.txt` | 注册新测试 |
 
 ## 边界与约束
 
-- **不依赖** ActionMap —— Phase 2 REQ-205 之后再迁移
-- **不做** 手柄 —— Phase 2 REQ-204
-- **不做** 鼠标锁定 / 隐藏 —— 留 TODO，REQ-017/019 评估
-- **不做** 加速度 / 阻尼模型 —— 一阶速度足够调试用
-- 控制器**不**调 `camera.updateMatrices()`，由 caller 控制 update 顺序
+- 不依赖 ActionMap
+- 不做手柄支持
+- 不做鼠标锁定 / 隐藏
+- 不做加速度、阻尼、惯性
+- 不做碰撞检测或场景约束
+- 不做 UI capture 协调；那是 `REQ-017` / `REQ-019` 的范围
 
 ## 依赖
 
-- **REQ-012**（必需）：`IInputState` 接口、`KeyCode::W/A/S/D/Space/LShift/LCtrl`、`MouseButton::Right`
-- **REQ-014**（必需）：deltaTime 由 `Clock` 提供
-- **REQ-015**（必需）：复用 `ICameraController` 抽象基类与 `MockInputState` 测试 helper
+- `REQ-012`：`IInputState`、`KeyCode`、`MouseButton`
+- `REQ-014`：`Clock` 提供 `deltaTime()`
+- `REQ-015`：`ICameraController` 抽象与 `MockInputState`
 
 ## 下游
 
-- **REQ-019**：demo_scene_viewer 用 F2 在 Orbit / FreeFly 之间切换
-- **REQ-018**：DebugPanel 显示 / 编辑 `position` / `yawDeg` / `pitchDeg` / `moveSpeedPerSecond`
-- **Phase 2 REQ-208**：扩展为带 ActionMap + 手柄的完整版
+- `REQ-019`：demo_scene_viewer 在 Orbit / FreeFly 之间切换
+- `REQ-018`：调试面板显示或编辑 free-fly 参数
+- Phase 2 更完整相机系统：扩展为 action map、手柄和鼠标锁定版本
 
 ## 实施状态
 
 2026-04-16 核查结果：未开始。
+
+- `FreeFlyCameraController` 尚未实现
+- `ICameraController` / `MockInputState` 仍依赖 `REQ-015` 落地

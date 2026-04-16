@@ -47,3 +47,14 @@ The GLTFLoader SHALL provide access to loaded mesh data with the same interface 
 #### Scenario: Get GLTF vertex positions
 - **WHEN** `getPositions()` is called after loading a GLTF file
 - **THEN** a vector of `Vec3f` vertex positions SHALL be returned
+
+### Requirement: Model file path convention
+Model test assets SHALL be located under `assets/models/` instead of the root-level `models/` directory. Any code or documentation referencing `models/viking_room.obj` SHALL be updated to reference `assets/models/viking_room/viking_room.obj`.
+
+#### Scenario: Viking room model at new path
+- **WHEN** loading the viking_room model
+- **THEN** the file path SHALL resolve to `assets/models/viking_room/viking_room.obj`
+
+#### Scenario: Old models directory does not exist
+- **WHEN** checking the repository root
+- **THEN** no `models/` directory SHALL exist at the root level

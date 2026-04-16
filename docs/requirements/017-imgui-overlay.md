@@ -1,46 +1,40 @@
-# REQ-017: ImGui overlay 接入 VulkanRenderer + 输入 forwarding
+# REQ-017: ImGui overlay 接入 VulkanRenderer
 
 ## 背景
 
-`src/infra/gui/gui.hpp:7-33` 与 `src/infra/gui/imgui_gui.cpp` 已经把 ImGui Vulkan backend 的初始化 / `beginFrame` / `endFrame` / `shutdown` 写好了，但**当前没有任何代码调用它**：
+本仓库已经引入了 ImGui 及其 SDL3 / Vulkan backend，但 2026-04-16 按当前代码核查，接线仍停留在半成品状态：
 
-- `VulkanRenderer::initialize` 没有创建 `Gui` 实例
-- `VulkanRenderer::draw` 没有调 `gui->beginFrame()` / `gui->endFrame()`
-- SDL3 的事件循环（`window_impl_sdl.cpp:39-46`）没有把事件 forward 给 `ImGui_ImplSDL3_ProcessEvent`
-- `Gui::init` 当前没有调 `ImGui_ImplSDL3_InitForVulkan`，缺一半 backend 初始化
+- [src/infra/gui/gui.hpp](../../src/infra/gui/gui.hpp) 与 [src/infra/gui/imgui_gui.cpp](../../src/infra/gui/imgui_gui.cpp) 已存在 `Gui` 包装，但它还没有被 `VulkanRenderer` 使用
+- `Gui::init()` 目前只调用了 `ImGui_ImplVulkan_Init()`，没有 `ImGui::CreateContext()`、没有 `ImGui_ImplSDL3_InitForVulkan()`，也没有有效的 descriptor pool / render pass / image count
+- `Gui::beginFrame()` 已经调用 `ImGui_ImplSDL3_NewFrame()`，但 SDL backend 实际上尚未初始化
+- `Gui::endFrame()` 现在用 `VK_NULL_HANDLE` 调 `ImGui_ImplVulkan_RenderDrawData()`，不能工作
+- [src/backend/vulkan/vulkan_renderer.cpp](../../src/backend/vulkan/vulkan_renderer.cpp) 还没有 `Gui` 成员、没有 UI 回调、也没有在 draw loop 里记录 ImGui draw data
+- [src/core/platform/window.hpp](../../src/core/platform/window.hpp) 只有 `getInputState()`，还没有 `getNativeHandle()`，`Gui` 也拿不到 `SDL_Window*`
+- SDL window 事件循环当前只处理 close，没有把事件 forward 给 ImGui
+- `REQ-013` 约定的 SDL 真实输入实现尚未落地，因此 `REQ-017` 必须把它作为依赖，而不是默认已完成
 
-加上 `vulkan_renderer.cpp:276-283` 的 draw loop 已经在遍历 `m_frameGraph.getPasses()`，理想情况是把 ImGui 作为一个独立的 `Pass_DebugUI` 节点接进去 —— 但这需要：
+把 ImGui 做成独立 FrameGraph pass 在设计上更整洁，但当前 `FrameGraph` / `RenderQueue` 还没有“非场景驱动 overlay pass”形态。为了尽快形成可用闭环，本 REQ 选择更小的落地方式：
 
-1. 让 ImGui 走自己的 VkRenderPass（或继承 swapchain pass，但绑定不同的 pipeline）
-2. 在 `FrameGraph` / `RenderQueue` 里加"非 RenderQueue 驱动的 pass 形态"
-
-工作量太大，会把 REQ-017 拖成一个准 Phase。Phase 1 roadmap 风险段也明确写了 "post-process / fullscreen pass 不走 buildFromScene"。
-
-**本 REQ 选择 overlay 路径**：ImGui 的 draw data 在 swapchain pass 末尾、`endRenderPass` 之前被 record 进同一个 command buffer。这让 ImGui 可以最快接入而**不破坏现有 FrameGraph 抽象**。代价是 ImGui pass 不出现在 `FrameGraph::getPasses()` 里，未来 REQ-101+ 引入 fullscreen pass 形态时再迁移。
+`ImGui` 作为 swapchain render pass 内的 overlay，在场景绘制完成后、`endRenderPass` 前录入同一个 command buffer。
 
 ## 目标
 
-1. SDL3 backend 初始化 (`ImGui_ImplSDL3_InitForVulkan`) 补齐
-2. SDL 事件 forward 给 ImGui，鼠标 / 键盘事件不会"穿透"UI
-3. `VulkanRenderer` 持有 `Gui` 实例，draw loop 在合适位置调 begin/endFrame
-4. 上层 demo 通过一个 `Gui::onDraw(callback)` 注入"画 panel 的回调"
-5. ImGui 的 `WantCaptureMouse` / `WantCaptureKeyboard` 状态可以被相机控制器查询，避免抢鼠标
+1. 补齐 ImGui SDL3 + Vulkan backend 初始化
+2. 让 SDL 事件能 forward 到 ImGui
+3. 让 `VulkanRenderer` 持有并驱动 `Gui`
+4. 允许 demo 注入一个简单的“画 UI 回调”
+5. 为后续相机控制器提供最小的 UI capture 协调点
 
 ## 需求
 
-### R1: `Gui::init` 补齐 SDL backend
+### R1: 修正 `Gui` 初始化契约
 
-修改 `src/infra/gui/imgui_gui.cpp:30-64` 的 `Gui::init`：
+修改 [src/infra/gui/gui.hpp](../../src/infra/gui/gui.hpp) 与 [src/infra/gui/imgui_gui.cpp](../../src/infra/gui/imgui_gui.cpp)。
 
-- 当前只调了 `ImGui_ImplVulkan_Init`
-- 需要在前面加 `ImGui::CreateContext()` + `ImGui_ImplSDL3_InitForVulkan(sdlWindow, instance)`
-- 这意味着 `Gui::InitParams` 需要新增 `SDL_Window* sdlWindow` 字段（PR 影响：caller 必须能拿到 SDL window 句柄）
-
-修改后的 `InitParams`：
+`Gui::InitParams` 需要扩展为当前 ImGui Vulkan backend 真正所需的初始化参数：
 
 ```cpp
 struct InitParams {
-  // 现有字段保持不变
   VkInstance instance;
   VkPhysicalDevice physicalDevice;
   VkDevice device;
@@ -49,271 +43,182 @@ struct InitParams {
   VkQueue graphicsQueue;
   VkQueue presentQueue;
   VkSurfaceKHR surface;
-  // 新增
-  void* sdlWindowHandle;     // SDL_Window* （void* 避免 gui.hpp 暴露 SDL3）
-  VkRenderPass renderPass;   // ImGui_ImplVulkan_Init 需要绑定到 swapchain 的 render pass
+  void* nativeWindowHandle;   // SDL 路径下实际为 SDL_Window*
+  VkRenderPass renderPass;
   uint32_t swapchainImageCount;
 };
 ```
 
-`init` 内部：
+`Gui::init()` 至少应按以下顺序完成：
 
-```cpp
-IMGUI_CHECKVERSION();
-ImGui::CreateContext();
-ImGui::StyleColorsDark();
+1. `IMGUI_CHECKVERSION()`
+2. `ImGui::CreateContext()`
+3. `ImGui::StyleColorsDark()` 或项目选定的默认 style
+4. `ImGui_ImplSDL3_InitForVulkan(static_cast<SDL_Window*>(params.nativeWindowHandle))`
+5. 创建 ImGui 专用 descriptor pool
+6. 调用 `ImGui_ImplVulkan_Init()`，并传入有效的 `renderPass`、`swapchainImageCount`、descriptor pool
 
-ImGui_ImplSDL3_InitForVulkan(static_cast<SDL_Window*>(params.sdlWindowHandle));
+`Gui::shutdown()` 必须对称执行：
 
-ImGui_ImplVulkan_InitInfo initInfo = {};
-initInfo.Instance = params.instance;
-initInfo.PhysicalDevice = params.physicalDevice;
-initInfo.Device = params.device;
-initInfo.QueueFamily = params.graphicsQueueFamilyIndex;
-initInfo.Queue = params.graphicsQueue;
-initInfo.PipelineCache = VK_NULL_HANDLE;
-initInfo.DescriptorPool = pImpl->descriptorPool;  // 见 R2
-initInfo.MinImageCount = 2;
-initInfo.ImageCount = params.swapchainImageCount;
-initInfo.RenderPass = params.renderPass;          // 关键
-initInfo.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
-initInfo.Allocator = nullptr;
-initInfo.CheckVkResultFn = nullptr;
+1. `ImGui_ImplVulkan_Shutdown()`
+2. `ImGui_ImplSDL3_Shutdown()`
+3. 销毁 ImGui descriptor pool
+4. `ImGui::DestroyContext()`
 
-if (!ImGui_ImplVulkan_Init(&initInfo)) {
-  throw std::runtime_error("Failed to init ImGui Vulkan backend");
-}
-```
+### R2: `Gui::endFrame` 必须接收真实 command buffer
 
-`shutdown` 同步加 `ImGui_ImplSDL3_Shutdown` + `ImGui::DestroyContext`。
+当前 `Gui::endFrame()` 用 `VK_NULL_HANDLE` 调 `ImGui_ImplVulkan_RenderDrawData()`，这只是占位写法。
 
-### R2: ImGui 专用 descriptor pool
-
-ImGui Vulkan backend 要求一个独立 descriptor pool（容纳字体纹理 + per-window state）。`Gui::Impl` 新增：
-
-```cpp
-VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
-```
-
-`init` 开头创建：标准的 1000 个 combined image sampler，单个 max set ≤ 16。`shutdown` 销毁。**不复用** `VulkanResourceManager` 的 descriptor pool，独立隔离 ImGui。
-
-### R3: `Gui::endFrame` 接收外部 cmd buffer
-
-当前 `endFrame()` 写死了 `VK_NULL_HANDLE` 调 `ImGui_ImplVulkan_RenderDrawData`，这是错的 —— 必须把渲染命令录进调用方的 command buffer。
-
-修改签名：
+接口改为：
 
 ```cpp
 void endFrame(VkCommandBuffer cmd);
 ```
 
-实现：
+行为要求：
+
+- `beginFrame()` 负责 `ImGui_ImplSDL3_NewFrame()`、`ImGui_ImplVulkan_NewFrame()`、`ImGui::NewFrame()`
+- `endFrame(cmd)` 负责 `ImGui::Render()` 与 `ImGui_ImplVulkan_RenderDrawData(drawData, cmd, VK_NULL_HANDLE)`
+- 若 `drawData == nullptr` 或顶点数为 0，可直接跳过提交
+
+### R3: `VulkanRenderer` 驱动 ImGui overlay
+
+修改 [src/backend/vulkan/vulkan_renderer.hpp](../../src/backend/vulkan/vulkan_renderer.hpp) 与 [src/backend/vulkan/vulkan_renderer.cpp](../../src/backend/vulkan/vulkan_renderer.cpp)。
+
+要求：
+
+- `VulkanRenderer` 内部持有一个 `Gui`
+- `initialize()` 完成 Vulkan device / render pass / swapchain 建立后，构造并初始化 `Gui`
+- `draw()` 中在录制场景 draw call 之前执行 `gui->beginFrame()`
+- 暴露一个仅限 `VulkanRenderer` 的 UI 回调入口，例如：
 
 ```cpp
-ImGui::Render();
-ImDrawData* drawData = ImGui::GetDrawData();
-if (drawData && drawData->TotalVtxCount > 0) {
-  ImGui_ImplVulkan_RenderDrawData(drawData, cmd, VK_NULL_HANDLE);
-}
+void setDrawUiCallback(std::function<void()> cb);
 ```
 
-### R4: `VulkanRenderer` 接入 Gui
+- `draw()` 中在 `gui->beginFrame()` 后调用该回调，让上层填充 widget
+- 场景绘制完成后、`endRenderPass()` 之前调用 `gui->endFrame(cmd)`
 
-修改 `src/backend/vulkan/vulkan_renderer.cpp`：
+本 REQ 明确采用 overlay 路径：
 
-- `Impl` 新增成员 `std::unique_ptr<infra::Gui> gui`
-- `initialize` 末尾创建 `gui = std::make_unique<infra::Gui>()`，调 `gui->init(...)`
-  - SDL window 句柄需要从 `Window` 接口暴露 —— 见 R5
-- `draw` loop 改造（在 `vulkan_renderer.cpp:262-285` 范围）：
+- ImGui 不进入 `FrameGraph::getPasses()`
+- ImGui 不建立独立 `Pass_DebugUI`
+- ImGui 绘制发生在 swapchain render pass 内部尾部
+
+### R4: `Window` 暴露 native handle
+
+为了让 `Gui` 在 SDL 路径下拿到 `SDL_Window*`，扩展 [src/core/platform/window.hpp](../../src/core/platform/window.hpp)：
 
 ```cpp
-cmdBufferMgr->beginFrame(currentFrameIndex);
-
-// 给 ImGui 喂事件 + 推进帧
-gui->beginFrame();
-
-// 用户回调：填充 panel
-if (drawUiCallback) {
-  drawUiCallback();
-}
-
-auto cmd = cmdBufferMgr->allocateBuffer();
-cmd->begin();
-cmd->beginRenderPass(...);
-cmd->setViewport(...);
-cmd->setScissor(...);
-
-// 现有的 frame graph draw loop
-for (auto &pass : m_frameGraph.getPasses()) {
-  for (auto &item : pass.queue.getItems()) {
-    // ... 现有 draw item ...
-  }
-}
-
-// ImGui 在所有 scene draw 之后录入同一个 render pass
-gui->endFrame(cmd->getHandle());
-
-cmd->endRenderPass();
-cmd->end();
+virtual void* getNativeHandle() const = 0;
 ```
 
-`drawUiCallback` 是 `std::function<void()>`，由上层注入：
+实现要求：
+
+- SDL window 返回底层 `SDL_Window*`
+- GLFW window 返回底层 `GLFWwindow*`
+- 该接口只做 type erasure，不在 `core` 层暴露 SDL / GLFW 头文件
+
+对应实现文件包括：
+
+- [src/infra/window/window.hpp](../../src/infra/window/window.hpp)
+- [src/infra/window/sdl_window.cpp](../../src/infra/window/sdl_window.cpp)
+- [src/infra/window/glfw_window.cpp](../../src/infra/window/glfw_window.cpp)
+
+### R5: SDL 事件转发给 ImGui
+
+本 REQ 依赖 `REQ-013` 提供真实 SDL 输入状态实现；在此基础上，SDL 事件轮询需要同时服务于：
+
+1. close 事件
+2. `Sdl3InputState` 状态更新
+3. ImGui backend 事件转发
+
+行为要求：
+
+- 在 SDL 事件循环中调用 `ImGui_ImplSDL3_ProcessEvent(&event)`
+- 该调用必须发生在 SDL backend 已初始化之后
+- 不能因为接入 ImGui 而破坏现有 close 行为
+
+实现方式不要求固定为某一种注入手段，但有两个约束：
+
+- 不引入不存在的 `window_impl_sdl.cpp` / `window_impl_glfw.cpp`
+- 不新增一个与 `REQ-012/013` 冲突的第二套事件主循环
+
+### R6: UI capture 协调点
+
+当前 [src/core/input/input_state.hpp](../../src/core/input/input_state.hpp) 还没有 UI capture 相关接口。为了让后续 Orbit / FreeFly 控制器在点击 ImGui 时不抢鼠标，本 REQ 在 `REQ-012` 的基础上补两个默认虚方法：
 
 ```cpp
-class VulkanRenderer : public Renderer {
-public:
-  // 新增
-  void setDrawUiCallback(std::function<void()> cb) {
-    drawUiCallback = std::move(cb);
-  }
-};
+virtual bool isUiCapturingMouse() const { return false; }
+virtual bool isUiCapturingKeyboard() const { return false; }
 ```
 
-注：`setDrawUiCallback` 是 `VulkanRenderer` 特有的，**不**进 `Renderer` 基类（其他 backend 还没适配 ImGui）。
+要求：
 
-### R5: `Window::getNativeHandle()` 暴露 SDL window 指针
+- `DummyInputState` 直接继承默认行为即可
+- `MockInputState` 也应能覆盖这两个状态，供控制器测试使用
+- SDL 真实输入实现完成后，应允许写入 `ImGui::GetIO().WantCaptureMouse / WantCaptureKeyboard`
 
-`Gui::init` 需要 `SDL_Window*`，但 `Window` 接口现在只暴露 Vulkan surface，没有 native window 句柄。
-
-新增到 `src/core/platform/window.hpp`：
-
-```cpp
-class Window {
-public:
-  // ...
-
-  /// 返回底层窗口的 native 句柄。
-  /// SDL3 实现：返回 SDL_Window*
-  /// GLFW 实现：返回 GLFWwindow*
-  /// 调用方按 backend 类型 cast。本接口不进一步 type-erase。
-  virtual void* getNativeHandle() const = 0;
-};
-```
-
-SDL 实现：`return pImpl->window;`（指向 `SDL_Window*`）
-GLFW 实现：`return pImpl->window;`（GLFWwindow*）
-
-### R6: SDL 事件 forward
-
-修改 `src/infra/window/sdl_window.cpp` 的事件循环（与 REQ-013 R3 协调）：
-
-```cpp
-bool shouldClose() {
-  bool quit = false;
-  SDL_Event event;
-  while (SDL_PollEvent(&event)) {
-    // 给 ImGui 喂事件
-    if (imguiEnabled) {
-      ImGui_ImplSDL3_ProcessEvent(&event);
-    }
-    if (inputState->handleSdlEvent(event)) {
-      quit = true;
-    }
-  }
-  return quit;
-}
-```
-
-`imguiEnabled` 是一个 bool，由 `setImguiEnabled(true)` 在 `Gui::init` 后被 `VulkanRenderer` 调用打开。**不**让 SDL 模块直接 include ImGui header —— 通过函数指针注入：
-
-```cpp
-// 新增到 window.hpp
-void setEventForwarder(std::function<void(const SDL_Event&)> fn);
-```
-
-但这又把 SDL 类型暴露到 hpp。妥协方案：**`ImGui_ImplSDL3_ProcessEvent` 是一个全局 C 函数**，直接在 `window_impl_sdl.cpp` 内 `#ifdef LX_HAVE_IMGUI` 调用。`LX_HAVE_IMGUI` 由 CMake 在编译 SDL window 时定义。
-
-### R7: 相机控制器避让 ImGui
-
-REQ-015 / REQ-016 的 controller 直接读 `IInputState`，会和 ImGui 抢鼠标。本 REQ 增加一个轻量协调点：
-
-修改 `IInputState`（在 REQ-012 接口上**追加**）：
-
-```cpp
-class IInputState {
-public:
-  // ...
-
-  /// ImGui / debug UI 是否正在捕获鼠标输入。
-  /// 为 true 时相机控制器应当跳过本帧的 mouse 处理。
-  /// 默认实现返回 false（不依赖 UI）。
-  virtual bool isUiCapturingMouse() const { return false; }
-  virtual bool isUiCapturingKeyboard() const { return false; }
-};
-```
-
-`Sdl3InputState` 实现：暴露两个 setter，`VulkanRenderer::draw` 在 `gui->beginFrame()` 之后写入：
-
-```cpp
-gui->beginFrame();
-auto io = ImGui::GetIO();
-sdlInputState->setUiCapturingMouse(io.WantCaptureMouse);
-sdlInputState->setUiCapturingKeyboard(io.WantCaptureKeyboard);
-```
-
-REQ-015 / REQ-016 的 `update` 内做：
-
-```cpp
-if (input.isUiCapturingMouse()) return;  // 跳过本帧
-```
-
-注意：本 REQ 在 REQ-012 接口上**追加**两个虚方法，不破坏。`DummyInputState` / `MockInputState` 默认实现已经返回 false。
+本 REQ 只负责把接口和写入点定义清楚，不在这里实现完整的“相机控制器如何消费 UI capture”逻辑；那部分由 `REQ-015` / `REQ-016` / `REQ-019` 接入。
 
 ## 测试
 
-**人工测试**：
+新增 `src/test/integration/test_imgui_overlay.cpp`，至少覆盖：
 
-- `demo_scene_viewer`（REQ-019）启动后，ImGui 窗口可见、可拖动、可点击
-- 点击 ImGui 窗口时相机不会被旋转
-- 鼠标移出 ImGui 窗口后右键拖拽相机正常
+- `gui_init_succeeds_after_renderer_initialize`
+  - 初始化 `Window + VulkanRenderer` 后，ImGui 路径可被成功建立
+- `draw_with_ui_callback_does_not_crash`
+  - 设置一个简单 `drawUiCallback`，连续跑若干帧 `draw()`，断言无崩溃
+- `ui_capture_flags_default_to_false_without_imgui`
+  - `DummyInputState` / `MockInputState` 默认行为正确
 
-**集成测试**（headless 范围）：
+测试约束：
 
-- `src/test/integration/test_imgui_overlay.cpp`：
-  - 构造 `Window` + `VulkanRenderer`，调 `initialize` 后断言 `gui->isInitialized() == true`
-  - 调 `setDrawUiCallback` 后跑 5 帧 draw，断言无崩溃、`vkQueueWaitIdle` 正常
-  - 不验证像素，CI 没头显示
+- 测试注册点是 [src/test/CMakeLists.txt](../../src/test/CMakeLists.txt)
+- 不做像素级截图验证
+- 若 CI 环境不具备图形条件，可将 renderer 相关测试标记为本地集成测试；但需求文档仍应保留对应验证目标
 
 ## 修改范围
 
 | 文件 | 改动 |
 |---|---|
-| `src/infra/gui/gui.hpp` | `InitParams` 加 `sdlWindowHandle` / `renderPass` / `swapchainImageCount`；`endFrame(VkCommandBuffer)` 改签名 |
-| `src/infra/gui/imgui_gui.cpp` | R1+R2+R3 实现 |
-| `src/infra/gui/CMakeLists.txt` | 添加 `imgui_impl_sdl3.cpp` 到 sources（如未启用） |
-| `src/backend/vulkan/vulkan_renderer.hpp` / `.cpp:119,237-322` | R4：持有 Gui、draw 接入、`setDrawUiCallback` |
-| `src/core/platform/window.hpp` | R5：`getNativeHandle()` 纯虚 |
-| `src/infra/window/window.hpp` / `window_impl_sdl.cpp` / `window_impl_glfw.cpp` | R5+R6：实现 `getNativeHandle`，SDL 事件 forward |
-| `src/core/input/input_state.hpp` | R7：追加 `isUiCapturingMouse / Keyboard` 默认 false |
-| `src/infra/window/sdl3_input_state.hpp` / `.cpp` | R7：实现两个 setter |
+| `src/infra/gui/gui.hpp` | 扩展 `InitParams`，调整 `endFrame` 签名 |
+| `src/infra/gui/imgui_gui.cpp` | 补齐 SDL3/Vulkan backend 初始化与 shutdown；创建 descriptor pool |
+| `src/backend/vulkan/vulkan_renderer.hpp` / `.cpp` | 持有 `Gui`、新增 UI 回调、在 draw loop 中接入 overlay |
+| `src/core/platform/window.hpp` | 新增 `getNativeHandle()` |
+| `src/infra/window/window.hpp` / `sdl_window.cpp` / `glfw_window.cpp` | 实现 `getNativeHandle()`；SDL 路径接入 ImGui event forwarding |
+| `src/core/input/input_state.hpp` | 追加 UI capture 默认虚方法 |
 | `src/test/integration/test_imgui_overlay.cpp` | 新增 |
-| `src/test/integration/CMakeLists.txt` | 注册 |
-| `CMakeLists.txt` | 定义 `LX_HAVE_IMGUI` 编译期宏 |
+| `src/test/CMakeLists.txt` | 注册测试 |
+
+注：
+
+- ImGui backend 源文件已经由现有 external imgui 构建逻辑编译；本 REQ 不应再引用不存在的 `src/infra/gui/CMakeLists.txt`
+- 当前 `Gui` 位于 `namespace infra`；若后续统一到 `LX_infra`，属于额外整理项，不阻塞本 REQ
 
 ## 边界与约束
 
-- **不做** ImGui 作为独立 FrameGraph pass —— 当前是 overlay 模式，留作 REQ-101+ 的技术债
-- **不做** ImGui dockspace / multi-viewport —— Phase 1 单窗口够用
-- **不做** ImGui font 自定义 —— 默认 ProggyClean 字体
-- **不做** GLFW backend 的 ImGui 集成 —— 项目主用 SDL3，GLFW 留 stub
-- 不动 `Renderer` 抽象基类 —— `setDrawUiCallback` 仅 `VulkanRenderer` 暴露
-- ImGui 渲染必须发生在 `endRenderPass` 之前，否则 validation layer 会抱怨
+- 不做 ImGui 独立 FrameGraph pass
+- 不做 dockspace / multi-viewport
+- 不做自定义字体系统
+- 不要求 GLFW 路径同步做完整 ImGui backend 集成；GLFW 至少补 `getNativeHandle()`，主线以 SDL 为准
+- 不修改 `Renderer` 抽象基类；UI 回调入口仅是 `VulkanRenderer` 的扩展接口
 
 ## 依赖
 
-- **REQ-012**（必需）：`IInputState` 提供 `isUiCapturingMouse / Keyboard` 钩子
-- **REQ-013**（必需）：SDL 真实事件循环（forward 给 ImGui 的入口在那里）
+- `REQ-012`：输入抽象与 `Window::getInputState()`
+- `REQ-013`：SDL 真实输入状态与事件循环
 
 ## 下游
 
-- **REQ-018**：`DebugPanel` helper 包装 ImGui widget，在 `setDrawUiCallback` 里被调用
-- **REQ-019**：demo_scene_viewer 注入 `setDrawUiCallback` 显示 panel
-- **REQ-101+**：在引入独立 fullscreen post-process pass 时，回头把 ImGui 也变成正经的 FrameGraph pass
+- `REQ-018`：基于 ImGui 构建调试面板
+- `REQ-019`：demo scene viewer 注入 UI 回调，并与 Orbit / FreeFly 做输入协调
 
 ## 实施状态
 
 2026-04-16 核查结果：未开始。
 
-- `infra/gui` 只有初始化雏形
-- 还没有接入 `VulkanRenderer`
-- SDL 事件也没有 forward 给 ImGui
+- `Gui` 仅有未接通的初始化雏形
+- `VulkanRenderer` 尚未驱动 ImGui
+- `Window` 还没有 `getNativeHandle()`
+- SDL 事件也尚未 forward 给 ImGui

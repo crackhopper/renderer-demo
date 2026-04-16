@@ -25,6 +25,20 @@ bool cdToWhereShadersExist(const std::string& shaderName) {
   return false;
 }
 
+bool cdToWhereAssetsExist(const std::string& subpath) {
+  fs::path p = fs::current_path();
+  for (int i = 0; i < 8; ++i) {
+    if (fs::exists(p / "assets" / subpath)) {
+      fs::current_path(p);
+      return true;
+    }
+    const auto parent = p.parent_path();
+    if (parent == p) break;
+    p = parent;
+  }
+  return false;
+}
+
 std::string getShaderPath(const std::string& shaderName){
   auto path1 = fs::current_path() / "shaders" / "glsl" / (shaderName + ".spv");
   if (fs::exists(path1)) {

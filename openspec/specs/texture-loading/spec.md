@@ -36,3 +36,14 @@ The texture loader SHALL convert all loaded images to RGBA format for consistent
 #### Scenario: Grayscale to RGBA conversion
 - **WHEN** a grayscale image is loaded
 - **THEN** it SHALL be converted to 4-channel RGBA with all channels set to the original grayscale value and alpha set to 255
+
+### Requirement: Texture file path convention
+Texture test assets SHALL be located under `assets/textures/` instead of the root-level `textures/` directory. Any code or documentation referencing `textures/viking_room.png` SHALL be updated to reference `assets/textures/viking_room/viking_room.png`.
+
+#### Scenario: Viking room texture at new path
+- **WHEN** loading the viking_room texture
+- **THEN** the file path SHALL resolve to `assets/textures/viking_room/viking_room.png`
+
+#### Scenario: Old textures directory does not exist
+- **WHEN** checking the repository root
+- **THEN** no `textures/` directory SHALL exist at the root level

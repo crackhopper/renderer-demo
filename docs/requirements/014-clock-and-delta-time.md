@@ -1,165 +1,155 @@
-# REQ-014: Clock + deltaTime 模块
+# REQ-014: Clock 收尾与平滑 deltaTime
 
 ## 背景
 
-当前所有 demo / 集成测试的主循环都没有时间概念：
+`Clock` 已经不是一个从零开始的新需求了。当前仓库里，基础时间推进能力已经存在，但还没有收尾到足以支撑调试面板和后续相机控制器的程度。
 
-- `src/test/test_render_triangle.cpp:104-156` 的 while 循环只是简单 `while (running)`，没有 deltaTime
-- 任何"按时间推进"的逻辑（旋转、动画、物理）目前要么硬编码（"每帧加 0.01 弧度"），要么干脆没有
-- REQ-016 的 FreeFly 相机控制器需要 `position += velocity * deltaTime`，没有 Clock 这件事根本没法做
-- REQ-018 的 DebugPanel 想显示 FPS，也要 deltaTime / smoothed deltaTime
-- REQ-020 的 `EngineLoop` 也需要一个稳定的 `tick()` 时间源来驱动每帧 update hook
+2026-04-16 按当前代码核查：
 
-[Phase 2 REQ-206](../../notes/roadmaps/phase-2-foundation-layer.md) 规划了完整的 `Clock` 类（含 fixed step accumulator、timeScale、frameCount）。本 REQ 是 Phase 2 REQ-206 的**最小可用前置版本**：只暴露 Phase 1 调试链路真正需要的字段（`tick / deltaTime / totalTime / frameCount`），fixed step / timeScale 等 Phase 2 再加。
+- [src/core/time/clock.hpp](../../src/core/time/clock.hpp) 与 [src/core/time/clock.cpp](../../src/core/time/clock.cpp) 已存在
+- `tick()`、`deltaTime()`、`totalTime()`、`frameCount()` 已实现
+- [src/core/gpu/engine_loop.cpp](../../src/core/gpu/engine_loop.cpp) 已在 `tickFrame()` 中调用 `m_clock.tick()`
+- `Clock` 还没有 `smoothedDeltaTime()`
+- 仓库里还没有专门覆盖 `Clock` 行为的集成测试
+
+这意味着：
+
+- `REQ-016` 的 FreeFly 相机已经有 `deltaTime()` 前置能力
+- `REQ-019` 通过 `EngineLoop::getClock()` 也已经有基础时间源
+- 但 `REQ-018` 的调试统计面板还缺一个更稳定的 FPS 输入
+- 当前 `Clock` 的行为也缺少单独测试保护
+
+[Phase 2 REQ-206](../../notes/roadmaps/phase-2-foundation-layer.md) 规划了更完整的时间系统（fixed step accumulator、timeScale、pause 等）。本 REQ 只做当前 `Clock` 的收尾：补平滑 deltaTime 和测试，不扩展到 Phase 2 的完整时间管理能力。
 
 ## 目标
 
-1. `core/time/clock.hpp` 提供一个 `Clock` 类
-2. `tick()` 在每帧开头调用，更新内部时间戳
-3. 提供 `deltaTime()` / `totalTime()` / `frameCount()` 三个 query
-4. 接口签名是 Phase 2 REQ-206 的子集，向上兼容
+1. 保留现有 `Clock` 的最小契约：`tick()` / `deltaTime()` / `totalTime()` / `frameCount()`
+2. 为 `Clock` 补 `smoothedDeltaTime()`，供 FPS / 调试统计使用
+3. 为 `Clock` 补独立测试，固定当前行为
+4. 不重复引入新的手写主循环接线；正式时间推进入口仍以 `EngineLoop` 为准
 
 ## 需求
 
-### R1: `Clock` 类
+### R1: 维持现有 `Clock` 契约
 
-新建 `src/core/time/clock.hpp` + `src/core/time/clock.cpp`：
+`src/core/time/clock.hpp/.cpp` 保持现有最小接口：
 
 ```cpp
-#pragma once
-#include <chrono>
-#include <cstdint>
-
-namespace LX_core {
-
 class Clock {
 public:
-  Clock();
-
-  /// 每帧开头调用一次。
-  /// 第一次调用：deltaTime = 0，totalTime = 0
-  /// 后续调用：deltaTime = now - lastTickTime，totalTime += deltaTime
   void tick();
 
-  /// 上一帧的时长（秒）。第一帧为 0。
-  float deltaTime() const { return m_deltaTime; }
-
-  /// 自首次 tick() 起累计时长（秒）。
-  double totalTime() const { return m_totalTime; }
-
-  /// 自首次 tick() 起的帧编号。第一帧为 0。
-  uint64_t frameCount() const { return m_frameCount; }
-
-  /// 平滑的 deltaTime，用于 FPS 显示。
-  /// 实现：滑动窗口 (last 60 frames) 取平均。
-  /// 没有足够样本时返回最近一次 deltaTime()。
-  float smoothedDeltaTime() const;
-
-private:
-  using Clk = std::chrono::steady_clock;
-  Clk::time_point m_startTime;
-  Clk::time_point m_lastTickTime;
-  bool   m_firstTick = true;
-  float  m_deltaTime = 0.0f;
-  double m_totalTime = 0.0;
-  uint64_t m_frameCount = 0;
-
-  static constexpr size_t kSmoothWindow = 60;
-  float  m_recentDeltas[kSmoothWindow] = {};
-  size_t m_recentDeltasFilled = 0;
-  size_t m_recentDeltasCursor = 0;
+  float deltaTime() const;
+  double totalTime() const;
+  uint64_t frameCount() const;
 };
-
-}
 ```
 
-实现要点：
+现有行为约束继续成立：
 
-- `tick()` 第一次调用：`m_startTime = m_lastTickTime = now()`，`m_deltaTime = 0`，`m_totalTime = 0`，`m_firstTick = false`，**不**自增 frameCount
-- 后续 `tick()`：`now = Clk::now()`；`m_deltaTime = duration<float>(now - m_lastTickTime).count()`；`m_totalTime = duration<double>(now - m_startTime).count()`；`m_lastTickTime = now`；`m_frameCount++`；环形写入 `m_recentDeltas`
+- 第一次 `tick()`：
+  - `deltaTime() == 0`
+  - `totalTime() == 0`
+  - `frameCount() == 0`
+- 后续 `tick()`：
+  - `deltaTime()` 为当前 tick 与上一次 tick 的时间差
+  - `totalTime()` 为自首次 tick 起累计的真实时长
+  - `frameCount()` 每次后续 tick 自增 1
 
-`smoothedDeltaTime()` 实现：
+本 REQ 不改变这些已存在语义。
 
-- 取 `m_recentDeltas[0..m_recentDeltasFilled)` 的算术平均
-- 当 filled == 0 返回 `m_deltaTime`
+### R2: 新增 `smoothedDeltaTime()`
 
-### R2: 与现有循环的接入示例
-
-修改 `src/test/test_render_triangle.cpp`，在主循环里展示用法（**不**新增功能，只是预演 REQ-020 / REQ-019 / REQ-016 的调用顺序）：
+在现有 `Clock` 上新增：
 
 ```cpp
-LX_core::Clock clock;
-while (running) {
-  clock.tick();
-  if (window->shouldClose()) break;
-  // ...原 camera 设置...
-  renderer->uploadData();
-  renderer->draw();
-  window->nextFrame();
-}
+float smoothedDeltaTime() const;
 ```
 
-不依赖 `clock.deltaTime()` 改变现有渲染行为 —— 这只是接入点示范。
+用途：
 
-从长期架构看，这段 while-loop 应在 REQ-020 中收敛到 `EngineLoop::tickFrame()` 内部；这里保留展开版，只为锁定 `Clock` 的最小契约。
+- 给调试统计或 FPS 显示提供一个比单帧 `deltaTime()` 更稳定的读数
 
-### R3: 单元测试
+实现约束：
 
-新建 `src/test/integration/test_clock.cpp`：
+- 用固定窗口的滑动平均实现
+- 窗口大小固定为 `60` 帧
+- 当样本数为 `0` 时，返回当前 `deltaTime()`
+- 当样本数不足 `60` 时，按已有样本平均
 
-```cpp
-TEST(Clock, first_tick_has_zero_delta) {
-  Clock c;
-  c.tick();
-  EXPECT_FLOAT_EQ(c.deltaTime(), 0.0f);
-  EXPECT_EQ(c.frameCount(), 0u);
-}
+允许的内部状态扩展包括：
 
-TEST(Clock, second_tick_has_nonzero_delta) {
-  Clock c;
-  c.tick();
-  std::this_thread::sleep_for(std::chrono::milliseconds(10));
-  c.tick();
-  EXPECT_GT(c.deltaTime(), 0.005f);   // 至少 5ms
-  EXPECT_LT(c.deltaTime(), 0.100f);   // 最多 100ms（防止超时机）
-  EXPECT_EQ(c.frameCount(), 1u);
-}
+- 固定大小的 recent delta 环形缓冲
+- 已填充样本数
+- 当前写入游标
 
-TEST(Clock, total_time_monotonically_increases) {
-  Clock c;
-  c.tick();
-  double t0 = c.totalTime();
-  std::this_thread::sleep_for(std::chrono::milliseconds(5));
-  c.tick();
-  EXPECT_GT(c.totalTime(), t0);
-}
+### R3: `tick()` 写入平滑窗口
 
-TEST(Clock, smoothed_delta_falls_back_to_delta_when_empty) {
-  Clock c;
-  EXPECT_FLOAT_EQ(c.smoothedDeltaTime(), c.deltaTime());
-}
-```
+`tick()` 在保持现有行为不变的前提下，需要额外把后续帧的 `deltaTime()` 写入平滑窗口。
 
-测试有 sleep 容差，不在 sanitizer / 高负载机器上要求 nanosecond 精度。
+约束：
+
+- 第一次 `tick()` 不写入平滑窗口
+- 从第二次 `tick()` 开始，将 `deltaTime()` 写入 recent delta 环形缓冲
+- `smoothedDeltaTime()` 只统计实际写入过的样本
+
+### R4: 正式接线以 `EngineLoop` 为准
+
+本 REQ 不再要求修改 `src/test/test_render_triangle.cpp` 去演示一个展开式 while-loop。
+
+原因：
+
+- 当前 [src/core/gpu/engine_loop.cpp](../../src/core/gpu/engine_loop.cpp) 已经是正式的运行时入口
+- `EngineLoop::tickFrame()` 已按正确顺序先调 `m_clock.tick()`
+- 再回到手写 while-loop 只会让文档同时维护两套入口
+
+因此，本 REQ 的正式接线要求是：
+
+- 继续由 `EngineLoop` 持有和推进 `Clock`
+- `EngineLoop::getClock()` 继续作为上层调试 UI、demo 和 update hook 的读取入口
+
+### R5: 集成测试
+
+新增 `src/test/integration/test_clock.cpp`，至少覆盖：
+
+- `first_tick_has_zero_delta`
+  - 首次 `tick()` 后 `deltaTime() == 0`
+  - 首次 `tick()` 后 `frameCount() == 0`
+- `second_tick_has_nonzero_delta`
+  - 两次 `tick()` 之间 sleep 少量时间
+  - 第二次 `tick()` 后 `deltaTime() > 0`
+  - `frameCount() == 1`
+- `total_time_monotonically_increases`
+  - 后续 `tick()` 后 `totalTime()` 大于第一次记录值
+- `smoothed_delta_falls_back_to_delta_when_empty`
+  - 尚无样本时 `smoothedDeltaTime() == deltaTime()`
+- `smoothed_delta_averages_recent_samples`
+  - 连续产生若干样本后，`smoothedDeltaTime()` 为 recent delta 的平均值
+
+测试约束：
+
+- 允许用 `sleep_for` 做粗粒度时间验证
+- 不要求高精度到纳秒级
+- 重点验证单调性、非负性和统计语义
 
 ## 修改范围
 
 | 文件 | 改动 |
 |---|---|
-| `src/core/time/clock.hpp` | 新增 |
-| `src/core/time/clock.cpp` | 新增 |
-| `src/core/CMakeLists.txt` | 把新文件加进 sources |
-| `src/test/test_render_triangle.cpp:104` | 主循环里加 `Clock clock; clock.tick();` 演示 |
+| `src/core/time/clock.hpp` | 补 `smoothedDeltaTime()` 声明和内部平滑窗口状态 |
+| `src/core/time/clock.cpp` | 补平滑窗口写入与 `smoothedDeltaTime()` 实现 |
+| `src/core/CMakeLists.txt` | 如有需要，确保 `clock.cpp` 已在 sources 中 |
 | `src/test/integration/test_clock.cpp` | 新增 |
-| `src/test/integration/CMakeLists.txt` | 注册新测试 |
+| `src/test/CMakeLists.txt` | 注册新测试 |
 
 ## 边界与约束
 
-- **不做** fixed step accumulator —— Phase 2 REQ-206
-- **不做** timeScale / pause —— Phase 2 REQ-206
-- **不做** 高分辨率 (sub-microsecond) 计时 —— `steady_clock` 在主流平台 ≥ µs 已经够 deltaTime 用
-- **不做** 帧率上限 / 等待垂直同步控制 —— 那是 swapchain 的事
-- 平滑窗口写死 60 帧，不做参数化。Phase 2 再开关
+- 不做 fixed step accumulator
+- 不做 timeScale / pause
+- 不做帧率限制
+- 不做高精度 profiler
+- 不重构 `EngineLoop`
+- 不回退到手写 while-loop 作为正式入口
 
 ## 依赖
 
@@ -167,24 +157,16 @@ TEST(Clock, smoothed_delta_falls_back_to_delta_when_empty) {
 
 ## 下游
 
-- **REQ-016**：FreeFly 相机的 `position += velocity * deltaTime`
-- **REQ-018**：DebugPanel 显示 `1.0f / smoothedDeltaTime()` 作为 FPS
-- **REQ-020**：`EngineLoop` 的 `tickFrame()` 需要显式 `clock.tick()`
-- **REQ-019**：demo_scene_viewer 将通过 `EngineLoop` 间接消费 `Clock`
-- **Phase 2 REQ-206**：在本 REQ 上加 fixed step / timeScale
+- `REQ-016`：FreeFly 相机继续依赖 `deltaTime()`
+- `REQ-018`：调试统计面板用 `smoothedDeltaTime()` 显示更稳定的 FPS
+- `REQ-019`：demo_scene_viewer 通过 `EngineLoop::getClock()` 读取时间信息
+- Phase 2 更完整时间系统：在当前 `Clock` 基础上扩 fixed step / timeScale / pause
 
 ## 实施状态
 
-2026-04-16 核查结果：**部分完成**。
+2026-04-16 实施完成。
 
-### 已完成
-
-- `src/core/time/clock.hpp` / `.cpp` 已存在
-- `tick()` / `deltaTime()` / `totalTime()` / `frameCount()` 已实现
-- `src/core/gpu/engine_loop.cpp` 已在 `tickFrame()` 中调用 `m_clock.tick()`
-
-### 尚未完成
-
-- `smoothedDeltaTime()` 尚未实现
-- 文档要求的 `test_clock` 尚未补齐
-- 原文里要求的手写 while-loop 接线已经过时，当前应以 `EngineLoop` 为正式接入点
+- `Clock` 类型已存在，`tick()` / `deltaTime()` / `totalTime()` / `frameCount()` 已实现
+- `EngineLoop::tickFrame()` 已推进 `Clock`
+- `smoothedDeltaTime()` 已实现（60 帧滑动平均环形缓冲）
+- `test_clock` 集成测试已通过（5 个测试场景）

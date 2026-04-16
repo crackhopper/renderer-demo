@@ -1,183 +1,198 @@
-# REQ-018: DebugPanel helper（封装常用 ImGui widget）
+# REQ-018: Debug UI helper（封装常用 ImGui widget）
 
 ## 背景
 
-REQ-017 把 ImGui 接进 `VulkanRenderer` 后，上层 demo 就可以在 `setDrawUiCallback` 里直接调 `ImGui::Begin / SliderFloat / ColorEdit3 / End`。但每个 demo 都从原始 ImGui API 开始重写"显示 FPS"、"调整 light 方向"、"显示 camera 状态"是重复劳动。
+`REQ-017` 完成后，`VulkanRenderer` 会提供一个基于 ImGui 的 overlay UI 回调入口。到那时，上层 demo 可以直接在 `setDrawUiCallback()` 里调用原始 ImGui API，但如果每个 demo 都从 `ImGui::Begin()` / `SliderFloat()` / `ColorEdit3()` 开始手写：
 
-更深层的问题：
+- `Vec3f` / `Vec4f` / `StringID` 这类引擎类型每次都要做一层桥接
+- 常见的调试面板，例如 FPS、相机参数、方向光参数，会在多个 demo 间重复
+- panel 位置、默认大小、命名风格会逐渐失去统一
 
-- ImGui API 直接操作裸 float 指针、std::string 与之不兼容、`ImGui::SliderFloat3` 接 `float[3]` 而引擎里是 `Vec3f` —— 每次都要 reinterpret_cast 或临时 buffer
-- demo 想"显示一个相机的所有字段"必须列 6-7 行 ImGui 调用，无法复用
-- 没有约定的 panel 命名 / 组织风格 → 多个 demo 长得不一致
-- 后续 Phase 2 的 `describe()` / dump API 想接入 UI 需要一个稳定的 helper 层
+这条需求的目标不是再造一个 GUI 系统，而是在 `infra/gui/` 下提供一组足够薄的 helper，让 demo 代码更短、风格更一致，同时不阻止调用方直接使用原生 ImGui。
 
-本 REQ 引入一个**轻量** helper namespace `LX_core::debug_ui`（**不是**新 GUI 框架），把常用渲染调试 widget 封装成几个一行调用。helper 直接调 ImGui，不引入第三方依赖。
+2026-04-16 按当前仓库核查：
+
+- `src/infra/gui/` 当前只有 [gui.hpp](../../src/infra/gui/gui.hpp) 与 [imgui_gui.cpp](../../src/infra/gui/imgui_gui.cpp)
+- [src/infra/CMakeLists.txt](../../src/infra/CMakeLists.txt) 是真实的 infra 构建入口，不存在 `src/infra/gui/CMakeLists.txt`
+- 测试注册点是 [src/test/CMakeLists.txt](../../src/test/CMakeLists.txt)，不是 `src/test/integration/CMakeLists.txt`
+- 现有材质系统的正式类型是 [MaterialInstance](../../src/core/asset/material_instance.hpp) / [MaterialTemplate](../../src/core/asset/material_template.hpp)，不是一个简单的 `Material`
+
+基于这些现实约束，本 REQ 只要求交付一组“薄封装 helper + 常见 panel 组合函数”，不把它扩张成自动反射编辑器。
 
 ## 目标
 
-1. 提供 `Vec3f` / `Vec4f` / `StringID` 等引擎类型与 ImGui widget 的桥接函数
-2. 提供针对 `Camera` / `LightBase` / `Clock` / `Material` 的"一行 panel"
-3. 提供一个 `DebugPanel::beginPanel(title)` / `endPanel()` 风格统一外观
-4. 不持有任何状态 —— 全部纯函数 + 显式 in/out 参数
-5. helper 文件归属在 **infra** 层（不进 core），因为它直接调 ImGui
+1. 提供 `Vec3f` / `Vec4f` / `StringID` 与 ImGui 的桥接函数
+2. 提供统一的 panel 容器入口
+3. 提供 `Clock` / `Camera` / `DirectionalLight` 的常用调试 panel
+4. helper 保持无状态、可组合、可与原生 ImGui 混用
+5. helper 放在 `infra/gui/`，不把 ImGui 依赖泄漏到 `core`
 
 ## 需求
 
-### R1: 类型桥接函数
+### R1: 新增 `debug_ui` helper 模块
 
-新建 `src/infra/gui/debug_ui.hpp` + `.cpp`：
+新建：
+
+- `src/infra/gui/debug_ui.hpp`
+- `src/infra/gui/debug_ui.cpp`
+
+命名空间使用：
+
+```cpp
+namespace LX_infra::debug_ui {
+}
+```
+
+原因：
+
+- helper 直接依赖 ImGui，不能放进 `LX_core`
+- helper 只是 `infra/gui` 的一个薄工具层，不是新的 subsystem
+
+### R2: 基础类型桥接函数
+
+`debug_ui.hpp` 至少提供以下 helper：
 
 ```cpp
 #pragma once
+
 #include "core/math/vec.hpp"
-#include "core/string/string_id.hpp"
-#include <string>
+#include "core/utils/string_table.hpp"
 
 namespace LX_infra::debug_ui {
 
-// 基础 widget —— 引擎类型 ↔ ImGui
-
-/// 等价 ImGui::DragFloat3，但接 Vec3f &
-bool dragVec3(const char* label, LX_core::Vec3f& v,
+bool dragVec3(const char* label, LX_core::Vec3f& value,
               float speed = 0.01f, float min = 0.0f, float max = 0.0f);
 
-bool dragVec4(const char* label, LX_core::Vec4f& v,
+bool dragVec4(const char* label, LX_core::Vec4f& value,
               float speed = 0.01f, float min = 0.0f, float max = 0.0f);
 
-bool sliderFloat(const char* label, float& v, float min, float max);
-bool sliderInt(const char* label, int& v, int min, int max);
+bool sliderFloat(const char* label, float& value, float min, float max);
+bool sliderInt(const char* label, int& value, int min, int max);
 
-/// RGB 颜色编辑（带 picker）
 bool colorEdit3(const char* label, LX_core::Vec3f& rgb);
 bool colorEdit4(const char* label, LX_core::Vec4f& rgba);
 
-/// 只读字段
+void labelText(const char* label, const char* value);
 void labelText(const char* label, const std::string& value);
-void labelInt(const char* label, int value);
 void labelFloat(const char* label, float value);
-void labelStringId(const char* label, LX_core::StringID id);
+void labelInt(const char* label, int value);
+void labelStringId(const char* label, LX_core::StringID value);
 
-}
+} // namespace LX_infra::debug_ui
 ```
 
-实现一律是 ImGui API 的 thin wrapper。`Vec3f` 取地址转 `float*` 安全因为 `Vec3f` 是 plain struct（按需在实现里 `static_assert(sizeof(Vec3f) == 12)`）。
+实现要求：
 
-### R2: Panel 容器
+- 本质上都是 ImGui thin wrapper
+- `Vec3f` / `Vec4f` 可按项目当前 math struct 布局直接桥接；如实现依赖连续 `float` 内存布局，可加静态断言保护
+- `labelStringId()` 应通过 `GlobalStringTable::get().getName(value.id)` 或等价方式输出可读文本
+
+### R3: Panel 容器 helper
+
+新增统一的 panel 容器入口：
 
 ```cpp
 namespace LX_infra::debug_ui {
 
-/// 等价 ImGui::Begin，但带项目统一风格（位置、大小默认值）。
-/// 返回 false 时调用方应该跳过内容、依然要调 endPanel()。
 bool beginPanel(const char* title);
 void endPanel();
 
-/// 折叠组（CollapsingHeader）
-bool beginGroup(const char* title);
-void endGroup();
+bool beginSection(const char* title);
+void endSection();
 
-/// 简短的两列布局（label : value）
-void twoColumnRow(const char* label, const char* value);
+void separatorText(const char* label);
 
-}
+} // namespace LX_infra::debug_ui
 ```
 
-`beginPanel` 内部：
+约束：
 
-```cpp
-ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
-ImGui::SetNextWindowSize(ImVec2(300, 0), ImGuiCond_FirstUseEver);
-return ImGui::Begin(title, nullptr,
-                    ImGuiWindowFlags_AlwaysAutoResize);
-```
+- `beginPanel()` 负责设置一致的默认位置 / 大小策略
+- `endPanel()` 必须始终与 `beginPanel()` 配对
+- `beginSection()` 可以是 `CollapsingHeader`、`TreeNode` 或等价折叠组，但对调用方保持统一入口
 
-### R3: 引擎对象 panel
+本 REQ 不要求封装更复杂的布局系统，例如 docking、表格 DSL 或响应式 panel 描述器。
 
-针对 `Camera` / `LightBase` / `Clock`：
+### R4: 常见调试 panel
+
+在 `debug_ui` 中提供以下组合函数：
 
 ```cpp
 namespace LX_infra::debug_ui {
 
-/// 渲染统计 panel：FPS / frameCount / deltaTime
 void renderStatsPanel(const LX_core::Clock& clock);
 
-/// Camera 调试 panel：position / target / fov / aspect / near / far
-/// 字段全部可编辑（绑定到 camera 字段地址），用户改完调用方负责 updateMatrices。
-void cameraPanel(const char* label, LX_core::Camera& camera);
+void cameraPanel(const char* title, LX_core::Camera& camera);
 
-/// DirectionalLight 调试 panel：direction / color / intensity
-/// 修改后会自动 setDirty（写入 ubo->setDirty()）
-void directionalLightPanel(const char* label, LX_core::DirectionalLight& light);
+void directionalLightPanel(const char* title,
+                           LX_core::DirectionalLight& light);
 
-}
+} // namespace LX_infra::debug_ui
 ```
 
-实现示例（renderStatsPanel）：
+行为要求：
 
-```cpp
-void renderStatsPanel(const LX_core::Clock& clock) {
-  if (!beginPanel("Render Stats")) { endPanel(); return; }
-  const float fps = 1.0f / std::max(clock.smoothedDeltaTime(), 1e-5f);
-  labelFloat("FPS", fps);
-  labelFloat("dt (ms)", clock.deltaTime() * 1000.0f);
-  labelInt("frame", static_cast<int>(clock.frameCount()));
-  endPanel();
-}
-```
+1. `renderStatsPanel(clock)`
+- 显示 `frameCount()`
+- 显示 `deltaTime()`（毫秒）
+- 显示 `smoothedDeltaTime()` 推导出的 FPS
 
-`cameraPanel` 示例：
+2. `cameraPanel(title, camera)`
+- 至少显示并允许编辑：
+  - `position`
+  - `target`
+  - `up`
+  - `fovY`
+  - `aspect`
+  - `nearPlane`
+  - `farPlane`
+- helper 只负责编辑字段本身
+- 是否以及何时调用 `camera.updateMatrices()` 由调用方负责，避免把隐藏副作用塞进 UI helper
 
-```cpp
-void cameraPanel(const char* label, LX_core::Camera& camera) {
-  if (!beginPanel(label)) { endPanel(); return; }
-  dragVec3("position", camera.position, 0.05f);
-  dragVec3("target",   camera.target,   0.05f);
-  sliderFloat("fovY",  camera.fovY,     5.0f, 120.0f);
-  sliderFloat("near",  camera.nearPlane, 0.01f, 10.0f);
-  sliderFloat("far",   camera.farPlane,  10.0f, 1000.0f);
-  endPanel();
-}
-```
+3. `directionalLightPanel(title, light)`
+- 基于当前 [DirectionalLight](../../src/core/scene/light.hpp) 的真实数据布局工作
+- 至少覆盖：
+  - `light.ubo->param.dir`
+  - `light.ubo->param.color`
+- 修改后 helper 应负责调用 `light.ubo->setDirty()`
 
-### R4: Material panel（最小版）
+注意：
 
-```cpp
-/// 列出 material 的所有 uniform 字段，根据反射类型自动选 widget。
-/// 走 IShader / ShaderResourceBinding 反射结果。Phase 1 暂只支持 float / vec3 / vec4。
-void materialPanel(const char* label, LX_core::Material& mat);
-```
+- `DirectionalLight` 当前并没有高层 `direction` / `intensity` 属性；它只有 `ubo->param`
+- 因此本 REQ 不应把“高层光照编辑模型”写成既成事实
 
-实现要点：
+### R5: 暂不把材质反射编辑器纳入本 REQ
 
-- 拿到 `mat.getShader()->getResourceBinding()`（已有的反射 API）
-- 遍历 UBO member，按 type dispatch：
-  - `float` → `sliderFloat`（默认范围 0..1，可在 Material 上加 range hint，或者本 REQ 写死）
-  - `Vec3f` → `colorEdit3`（如果 member 名包含 "color" / "albedo" / "emissive"）否则 `dragVec3`
-  - `Vec4f` → `colorEdit4`
-- 不支持的 type 显示 `labelText` 占位
+旧版本把 `materialPanel()` 写成正式需求，但按当前代码基础，这会把本条需求一下子扩张到：
 
-注意：`materialPanel` 是一个 **best effort** helper，复杂材质（如 PBR 多通道贴图开关）需要 demo 自己写专用 panel；本 REQ 只覆盖最常见的 80% 路径。
+- `MaterialInstance` buffer slot 枚举
+- `ShaderResourceBinding` 成员反射编辑
+- 多 pass / 多 bindingName 的冲突处理
+- 类型与范围 hint 规则
 
-### R5: 集成测试
+这些都比“薄 helper”复杂得多，而且当前仓库里并没有一个稳定的、高层的 `Material` 编辑抽象。
 
-由于所有 helper 都直接调 ImGui，单元测试只能跑非常基础的"接口存在 + 编译通过"测试。
+因此本 REQ 明确：
 
-新建 `src/test/integration/test_debug_ui_smoke.cpp`：
+- 不要求在本阶段实现 `materialPanel()`
+- 如果后续 demo 需要材质 UI，可先手写专用 ImGui 代码
+- 材质反射面板应留给单独需求，或作为 `REQ-018` 的后续扩展子项重新定义
 
-```cpp
-TEST(DebugUi, link_check) {
-  // 不真正调用（需要 ImGui context），只验证符号存在
-  using namespace LX_infra::debug_ui;
-  auto p1 = &dragVec3;
-  auto p2 = &renderStatsPanel;
-  auto p3 = &cameraPanel;
-  EXPECT_NE(p1, nullptr);
-  EXPECT_NE(p2, nullptr);
-  EXPECT_NE(p3, nullptr);
-}
-```
+### R6: 测试
 
-真正的功能验证依赖 REQ-019 的人工跑 demo。
+新增 `src/test/integration/test_debug_ui_smoke.cpp`。
+
+测试目标以“编译/链接与极薄行为验证”为主，至少覆盖：
+
+- 基础 helper 符号可见并可链接
+- `beginPanel/endPanel`、`dragVec3`、`renderStatsPanel`、`cameraPanel`、`directionalLightPanel` 的接口存在
+- 如测试环境可安全创建 ImGui context，可补一个最小 smoke case；否则允许只做链接级验证
+
+测试注册点：
+
+- [src/test/CMakeLists.txt](../../src/test/CMakeLists.txt)
+
+本 REQ 不要求像素截图测试，也不要求在 headless CI 中完整验证 ImGui 绘制结果。
 
 ## 修改范围
 
@@ -185,30 +200,32 @@ TEST(DebugUi, link_check) {
 |---|---|
 | `src/infra/gui/debug_ui.hpp` | 新增 |
 | `src/infra/gui/debug_ui.cpp` | 新增 |
-| `src/infra/gui/CMakeLists.txt` | 把新文件加进 sources |
+| `src/infra/CMakeLists.txt` | 把 `gui/debug_ui.cpp` 加入 `INFRA_SOURCES` |
 | `src/test/integration/test_debug_ui_smoke.cpp` | 新增 |
-| `src/test/integration/CMakeLists.txt` | 注册 |
+| `src/test/CMakeLists.txt` | 注册测试 |
 
 ## 边界与约束
 
-- **不引入** 任何新依赖
-- **不**自创"GUI DSL"或"reactive panel" —— 直接调 ImGui，调用方完全保留 ImGui 原生 API 的访问
-- **不持有状态** —— 所有 helper 都是纯函数。如果未来需要"开/关 panel" 这类持久状态，由 demo 自己 own 一个 bool
-- `materialPanel` 只覆盖 float / vec3 / vec4，不支持 mat4 / texture handle / int array
-- 不试图做"自动 capability dump" —— Phase 2 REQ-209 / REQ-210 的 `describe()` 可以喂给本 helper，但本 REQ 不绑定它
-- 命名空间用 `LX_infra::debug_ui` 而不是 `LX_core::*` —— 因为 helper 直接 include ImGui header，core 层不应该 leak GUI 依赖
+- 不引入新依赖
+- 不创建新的 GUI framework、DSL 或状态系统
+- helper 保持无状态；面板开关、持久显示偏好等由调用方持有
+- 不要求自动材质反射编辑
+- 不要求自动 scene graph 检视器
+- 调用方始终可以直接混用原生 ImGui API
 
 ## 依赖
 
-- **REQ-017**（必需）：ImGui 已经在 `VulkanRenderer::draw` 里被调用且 context 可用
-- 不强依赖 REQ-014 —— 但 `renderStatsPanel(Clock&)` 需要 `Clock`，所以**事实上**需要 REQ-014 已经合入
+- `REQ-017`：ImGui overlay 已能在 `VulkanRenderer` 中被驱动
+- `REQ-014`：`renderStatsPanel()` 依赖 `Clock::deltaTime()` / `smoothedDeltaTime()`
 
 ## 下游
 
-- **REQ-019**：demo_scene_viewer 在 `setDrawUiCallback` 内调本 helper
-- 后续 Phase 1 REQ-101+：post-process 调试面板（exposure / bloom threshold / FXAA toggle）走同一组 helper
-- **Phase 2 REQ-209 / REQ-210**：`describe()` API 输出可以接入 `materialPanel` / `cameraPanel` 的反射路径
+- `REQ-019`：demo scene viewer 在 UI callback 中复用这些 helper
+- 后续材质/后处理调试 UI：可继续沿用 `debug_ui` 的基础桥接函数与 panel 容器
 
 ## 实施状态
 
 2026-04-16 核查结果：未开始。
+
+- `src/infra/gui/` 还没有 `debug_ui` helper
+- 现有 ImGui 接线仍停留在 `REQ-017` 的待实现阶段

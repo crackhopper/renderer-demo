@@ -194,7 +194,7 @@ set(INFRA_SOURCES
 
 # Add window implementation based on backend
 if(USE_SDL)
-    list(APPEND INFRA_SOURCES window/sdl_window.cpp)
+    list(APPEND INFRA_SOURCES window/sdl_window.cpp window/sdl3_input_state.cpp)
 elseif(USE_GLFW)
     list(APPEND INFRA_SOURCES window/glfw_window.cpp)
 endif()

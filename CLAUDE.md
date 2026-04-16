@@ -25,6 +25,11 @@ See `AGENTS.md` for full project context, architecture, and coding standards.
 - `openspec/specs/frame-graph/spec.md` — `FrameGraph` / `RenderQueue` / `RenderTarget` / `ImageFormat`
 - `openspec/specs/pipeline-cache/spec.md` — Backend pipeline cache: `find` / `getOrCreate` / `preload`
 - `openspec/specs/skeleton-resource/spec.md` — Skeleton as core resource, no `IComponent`
+- `openspec/specs/asset-directory-convention/spec.md` — `assets/` directory structure, budget, and README conventions
+- `openspec/specs/asset-path-helper/spec.md` — `cdToWhereAssetsExist()` helper and CMake sync
+- `openspec/specs/input-abstraction/spec.md` — `KeyCode`, `MouseButton`, `IInputState`, `DummyInputState`
+- `openspec/specs/clock-time-system/spec.md` — Clock contract: tick, deltaTime, smoothedDeltaTime
+- `openspec/specs/sdl-input-state/spec.md` — Sdl3InputState: SDL3 event-driven input implementation
 
 ## Design Docs Index
 

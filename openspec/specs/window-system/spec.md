@@ -34,17 +34,15 @@ The window system SHALL expose the ability to create a Vulkan `VkSurfaceKHR` fro
 - **THEN** a `std::runtime_error` SHALL be thrown with an appropriate message
 
 ### Requirement: Window close detection
-The window system SHALL provide a way to detect when the user has requested the window to close (e.g., pressing the close button).
+`shouldClose()` SHALL poll all SDL events in a single loop, forwarding each event to `Sdl3InputState::handleSdlEvent()` before checking for quit. Events SHALL NOT be consumed twice.
 
-#### Scenario: Detect close request via polling
-- **WHEN** `shouldClose()` is called
-- **WHEN** a `SDL_QUIT` event has been received since the last call
-- **THEN** `true` SHALL be returned
+#### Scenario: shouldClose updates input and detects quit in one pass
+- **WHEN** `shouldClose()` is called and SDL events include both key presses and a quit event
+- **THEN** key press states SHALL be updated in the input state AND `shouldClose()` SHALL return `true`
 
-#### Scenario: No close request pending
-- **WHEN** `shouldClose()` is called
-- **WHEN** no `SDL_QUIT` event has been received
-- **THEN** `false` SHALL be returned
+#### Scenario: shouldClose updates input without quit
+- **WHEN** `shouldClose()` is called and SDL events include only key presses
+- **THEN** key press states SHALL be updated and `shouldClose()` SHALL return `false`
 
 ### Requirement: Close callback registration
 The window system SHALL support registering a callback function that is invoked when the window is closed.
@@ -66,3 +64,28 @@ The window system SHALL compile and work identically when `USE_GLFW` is enabled 
 #### Scenario: GLFW window creation
 - **WHEN** `USE_GLFW` is defined and `Window` is constructed
 - **THEN** a GLFW window SHALL be created with Vulkan support and resize handling
+
+### Requirement: Window provides input state access
+The `Window` interface (`src/core/platform/window.hpp`) SHALL declare a pure virtual method:
+
+```cpp
+virtual InputStatePtr getInputState() const = 0;
+```
+
+The same `Window` instance SHALL return the same shared input state object on every call. `LX_infra::Window` SHALL override this method. The SDL implementation SHALL return a `Sdl3InputState`; the GLFW implementation SHALL return a `DummyInputState`.
+
+#### Scenario: getInputState returns non-null
+- **WHEN** calling `getInputState()` on any `Window` implementation
+- **THEN** the returned `InputStatePtr` SHALL NOT be null
+
+#### Scenario: getInputState returns same object
+- **WHEN** calling `getInputState()` twice on the same `Window` instance
+- **THEN** both calls SHALL return the same pointer
+
+#### Scenario: SDL window returns real input state
+- **WHEN** calling `getInputState()` on the SDL window implementation
+- **THEN** the returned object SHALL be a `Sdl3InputState` that responds to SDL events
+
+#### Scenario: GLFW window returns DummyInputState
+- **WHEN** calling `getInputState()` on the GLFW window implementation
+- **THEN** the returned object SHALL be a `DummyInputState` with all-zero semantics

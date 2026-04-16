@@ -1,5 +1,6 @@
 #ifdef USE_GLFW
 #include "window.hpp"
+#include "core/input/dummy_input_state.hpp"
 #include <GLFW/glfw3.h>
 #include <functional>
 #include <stdexcept>
@@ -76,6 +77,11 @@ VkSurfaceKHR Window::getVulkanSurface(VkInstance instance) const {
   return pImpl->getVulkanSurface(instance);
 }
 void Window::onClose(std::function<void()> cb) { pImpl->closeCallback = cb; }
+
+LX_core::InputStatePtr Window::getInputState() const {
+  static auto dummy = std::make_shared<LX_core::DummyInputState>();
+  return dummy;
+}
 
 void *Window::createGraphicsHandle(GraphicsAPI api,
                                    void *graphicsInstance) const {

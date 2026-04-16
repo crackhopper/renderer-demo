@@ -36,6 +36,22 @@ add_subdirectory(src/test)
 
 
 
+# -------------------------------
+# 构建期资产同步：symlink 优先，copy 兜底
+# -------------------------------
+if(NOT EXISTS "${CMAKE_BINARY_DIR}/assets")
+  file(CREATE_LINK
+    "${CMAKE_SOURCE_DIR}/assets"
+    "${CMAKE_BINARY_DIR}/assets"
+    SYMBOLIC
+    RESULT _assets_link_result
+  )
+  if(NOT _assets_link_result EQUAL 0)
+    message(STATUS "Symlink failed (${_assets_link_result}), copying assets to build dir")
+    file(COPY "${CMAKE_SOURCE_DIR}/assets" DESTINATION "${CMAKE_BINARY_DIR}")
+  endif()
+endif()
+
 # 引入shader编译的target
 add_subdirectory(shaders)
 

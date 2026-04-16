@@ -18,6 +18,10 @@ set(TEST_INTEGRATION_EXE_LIST
   test_engine_loop
   test_generic_material_loader
   test_material_variant_rules
+  test_assets_layout
+  test_input_state
+  test_clock
+  test_sdl_input
 
   # test_render_sphere
   # test_render_model
@@ -39,6 +43,12 @@ foreach(TEST_EXE ${TEST_INTEGRATION_EXE_LIST})
   #   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/test/"
   # )
 endforeach()
+
+# SDL input test needs USE_SDL define and SDL3 headers
+if(USE_SDL AND TARGET test_sdl_input)
+  target_compile_definitions(test_sdl_input PRIVATE USE_SDL=1)
+  target_link_libraries(test_sdl_input PRIVATE SDL3::SDL3)
+endif()
 
 
 set(TEST_APP_EXE_LIST

@@ -1,5 +1,6 @@
 #ifdef USE_SDL
 #include "window.hpp"
+#include "sdl3_input_state.hpp"
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
 #include <functional>
@@ -15,8 +16,9 @@ struct Window::Impl {
   SDL_Window *window = nullptr;
   VkSurfaceKHR vkSurface = VK_NULL_HANDLE;
   std::function<void()> closeCallback;
+  std::shared_ptr<Sdl3InputState> inputState;
 
-  Impl(const char *t, int w, int h) : width(w), height(h), title(t) {
+  Impl(const char *t, int w, int h) : width(w), height(h), title(t), inputState(std::make_shared<Sdl3InputState>()) {
     if (!SDL_Init(SDL_INIT_VIDEO)) {
       auto errorstr = SDL_GetError();
       std::cerr << "Failed to initialize SDL: " << errorstr << "\n";
@@ -36,13 +38,15 @@ struct Window::Impl {
     SDL_Quit();
   }
 
-  bool shouldClose() const {
+  bool shouldClose() {
     SDL_Event event;
+    bool quit = false;
     while (SDL_PollEvent(&event)) {
-      if (event.type == SDL_EVENT_QUIT)
-        return true;
+      if (inputState->handleSdlEvent(event)) {
+        quit = true;
+      }
     }
-    return false;
+    return quit;
   }
 
   VkSurfaceKHR getVulkanSurface(VkInstance instance) {
@@ -117,6 +121,10 @@ VkSurfaceKHR Window::getVulkanSurface(VkInstance instance) const {
   return const_cast<Impl *>(pImpl)->getVulkanSurface(instance);
 }
 void Window::onClose(std::function<void()> cb) { pImpl->closeCallback = cb; }
+
+LX_core::InputStatePtr Window::getInputState() const {
+  return pImpl->inputState;
+}
 
 WindowGraphicsHandle
 Window::createGraphicsHandle(GraphicsAPI api,
