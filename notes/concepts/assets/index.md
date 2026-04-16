@@ -32,7 +32,7 @@
 - 准备 `assets/` 目录里的模型、纹理和测试资源
 - 用 loader 把它们转换成运行时对象
 - 把这些对象交给 [场景对象](../scene/index.md) 或 [材质系统](../material/index.md)
-- 再由 [渲染管线](../pipeline/index.md) 决定它们如何参与 pipeline 身份与构建
+- 再由 [材质系统里的 Pipeline 说明](../material/what-is-pipeline.md) 决定它们如何参与 pipeline 身份与构建
 
 ## 网格对象在这里扮演什么角色
 

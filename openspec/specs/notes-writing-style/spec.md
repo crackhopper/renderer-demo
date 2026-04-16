@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Define the house style for human-facing documentation under `notes/`, especially the `概念` section.
+Define the house style for human-facing documentation under `notes/`, especially the `concepts/` section.
 
 This spec is not about code behavior. It is about how we explain the engine to human readers so that notes stay readable, consistent, and aligned with the project voice.
 
@@ -16,7 +16,9 @@ This spec applies to:
 
 It does not replace technical specs under `openspec/specs/`, which remain normative for implementation behavior.
 
-## Requirement: Concepts use an explanatory narrative, not a reference-manual voice
+## Requirements
+
+### Requirement: Concepts use an explanatory narrative, not a reference-manual voice
 
 Concept documents SHALL read like guided explanations, not API reference pages or product manuals.
 
@@ -28,73 +30,116 @@ They SHALL answer, in natural reading order:
 - where its boundaries are
 - how it connects to the implementation and deeper docs
 
-Concept documents SHOULD introduce ideas in paragraphs first, and use lists only where lists materially improve readability.
-
-Concept documents SHALL avoid template-like headings such as:
-
-- `这个系统是什么`
-- `它有什么用`
-- `你通常怎么用它`
-- `当前项目做到哪了`
-- `底层现在怎么实现`
-
-when used mechanically across every page.
+Concept documents SHALL avoid template-like headings such as `这个系统是什么` / `它有什么用` / `底层现在怎么实现` when used mechanically across every page.
 
 Instead, headings SHOULD be phrased as meaningful reading cues that match the topic, for example:
 
-- `从蓝图到实例`
-- `从文件到运行时对象`
-- `一条 pipeline 是怎样被确定的`
-- `资源怎样成为场景里的对象`
+- `模板与 Pass：材质的结构定义`
+- `Shader 在材质中的角色`
+- `模板如何影响 Pipeline`
 
-## Requirement: Use "我们" voice, not second-person instruction voice
+#### Scenario: Page headings are topic-specific
+- **WHEN** a new concept page is created
+- **THEN** its title and section headings describe the mechanism or role being explained, not a generic category label
 
-Human-facing notes SHALL use first-person plural narration (`我们`) as the default voice.
+### Requirement: Use analogies to anchor abstract concepts
 
-They SHALL NOT use second-person instructional voice as the primary narrative style, including patterns such as:
+Concept pages SHALL introduce core abstractions with a concrete analogy before any technical detail.
 
-- `你会在什么场景接触它`
-- `你通常怎么用它`
-- `如果你想...`
-- `你可以继续看...`
+The analogy SHOULD:
 
-This rule exists to keep notes aligned with the existing tutorial voice: collaborative, explanatory, and engineering-oriented.
+- map the abstract object to something the reader already understands
+- be stated once at the introduction and reused consistently across the page
+- appear in tables and inline when it aids understanding
 
-Short direct instructions are allowed inside code snippets, warnings, or migration notes when needed, but the surrounding prose SHALL remain in `我们` voice.
+Example: "`MaterialTemplate` is a recipe — it defines what steps (passes) a dish needs and what kind of ingredients (shader / variants / render state). `MaterialInstance` is the dish on the table — filled with actual seasoning amounts (parameter values) and real ingredients (textures)."
 
-## Requirement: Concepts are capability-oriented, not category checklists
+The analogy MUST NOT replace technical precision. After the analogy, the document SHALL ground each point in concrete code objects, field names, and API calls.
 
-Concept pages SHALL organize around the reader's mental model of the engine, not around a checklist copied from planning notes.
+#### Scenario: Abstract concept introduced with analogy
+- **WHEN** a concept page introduces `MaterialPassDefinition`
+- **THEN** it first states a one-sentence analogy (e.g., "a single step in the recipe"), then immediately maps its fields to concrete meanings via a table or list
 
-This means:
+### Requirement: Use tables for structured comparisons
 
-- page titles SHOULD describe the underlying idea or flow, not merely repeat a category label
-- sections SHOULD be ordered for understanding, not for requirement bookkeeping
-- implementation status MAY be included, but it SHALL support understanding rather than dominate the page
+When a concept involves:
 
-For example, a good concept title explains a mechanism or role:
+- multiple objects with parallel attributes
+- a boundary between two systems (e.g., template vs instance)
+- a set of fields with name / meaning / analogy
 
-- `资产如何进入引擎`
-- `材质如何决定一条渲染路径`
-- `相机怎样进入一帧渲染`
+the document SHALL use a Markdown table rather than prose paragraphs or flat bullet lists.
 
-A weaker title merely repeats a bucket name with no reader guidance.
+Tables SHOULD have 2–4 columns. Common patterns:
 
-## Requirement: Concepts explain current reality first
+- `| Object | Role | Analogy |`
+- `| Field | Meaning | Analogy |`
+- `| Affects pipeline | Does not affect pipeline |`
+- `| Path | When to use |`
+
+#### Scenario: Template vs instance boundary
+- **WHEN** a page needs to explain what belongs to template vs instance
+- **THEN** it presents a two-column table, not interleaved prose
+
+### Requirement: Show YAML-to-code correspondence for configurable concepts
+
+When a concept has a YAML configuration surface (e.g., `.mat.yaml`), the document SHALL include at least one annotated YAML block showing the correspondence between YAML fields and runtime objects.
+
+Annotations SHOULD be inline comments mapping YAML keys to C++ types or API calls:
+
+```yaml
+passes:
+  Forward:                          # → template.setPass(Pass_Forward, ...)
+    renderState:                    # → MaterialPassDefinition.renderState
+      cullMode: Back
+```
+
+This helps the reader build a mental model that spans both the data format and the runtime representation.
+
+#### Scenario: Configurable concept includes YAML mapping
+- **WHEN** a concept page describes a system that can be configured via YAML
+- **THEN** the page includes at least one YAML block with inline `# →` annotations linking to the runtime equivalents
+
+### Requirement: Concepts describe only current reality
 
 Concept pages SHALL describe the current engine as it exists today.
 
-They MAY mention future or missing capability, but only after current behavior is made clear.
+They SHALL NOT:
+
+- reference old designs that no longer exist (e.g., "no longer uses X", "previously had Y")
+- compare against a removed implementation to explain the current one
+- present future architecture as if it already exists
 
 When a capability is incomplete or missing:
 
 - the document SHALL clearly label it as partial or not yet implemented
 - the document SHALL link to an active requirement when one exists
-- if no active requirement exists and the capability is important to the concept map, a new requirement SHOULD be created before the concept claims the feature as planned
 
-Concept pages SHALL NOT present future architecture as if it already exists.
+#### Scenario: No references to removed designs
+- **WHEN** reviewing a concept page
+- **THEN** it contains no phrases like "不再维护", "已经去掉", "旧的做法是" — only forward-facing description of current behavior
 
-## Requirement: Cross-links must preserve the concept-to-design ladder
+### Requirement: Use "我们" voice, not second-person instruction voice
+
+Human-facing notes SHALL use first-person plural narration (`我们`) as the default voice.
+
+They SHALL NOT use second-person instructional voice (`你`) as the primary narrative style.
+
+Short direct instructions are allowed inside code snippets, warnings, or migration notes, but surrounding prose SHALL remain in `我们` voice.
+
+#### Scenario: Page uses correct voice
+- **WHEN** a concept page is reviewed
+- **THEN** the primary narrative uses `我们` and avoids `你会` / `你可以` / `如果你想` patterns
+
+### Requirement: Key API surfaces presented as compact tables
+
+When a page mentions more than 3 API methods or fields, it SHALL use a table with `| Method | Purpose |` or `| Field | Meaning |` format rather than an enumerated list of single-sentence explanations.
+
+#### Scenario: API surface in table form
+- **WHEN** a concept page lists MaterialTemplate's key methods
+- **THEN** they appear in a `| Method | Purpose |` table, not a bullet list
+
+### Requirement: Cross-links preserve the concept-to-design ladder
 
 Concept pages SHALL link readers downward into deeper implementation documents.
 
@@ -104,57 +149,43 @@ The usual ladder is:
 2. subsystem page explains current implementation shape
 3. spec explains normative behavior
 
-Concept pages SHOULD therefore end or conclude with references to the most relevant:
+Concept pages SHOULD end with a "继续阅读" section containing 2–4 links to the most relevant subsystem docs, source files, or specs.
 
-- `notes/subsystems/*.md`
-- `openspec/specs/*/spec.md` when helpful
-- `docs/requirements/*.md` for incomplete capability
+#### Scenario: Page ends with focused cross-links
+- **WHEN** a concept page is complete
+- **THEN** it ends with a short list of 2–4 links to deeper docs, not a long reference dump
 
-## Requirement: Tutorials and concepts should share tone, not structure
+### Requirement: Index pages use a consistent structure
 
-`notes/tutorial/` is the reference tone for approachable documentation.
+Index pages (e.g., `index.md` for a concept group) SHALL follow this structure:
 
-Concept pages SHOULD resemble tutorial prose in these ways:
+1. **One-sentence system description** — what it does in the engine
+2. **One-paragraph analogy** — anchor the reader's mental model
+3. **Core objects table** — key types with role and analogy columns
+4. **Reading order** — numbered list of sub-pages with descriptive titles
+5. **Authority references** — links to subsystem docs and specs
 
-- explain before enumerating
-- prefer engineering narrative over abstract taxonomy
-- keep paragraphs concrete and grounded in the current repo
+#### Scenario: Index page structure
+- **WHEN** a new concept group index is created
+- **THEN** it contains all five sections in the order above
 
-Concept pages do NOT need to copy the tutorial table/step format. They only need to share the same voice and readability standard.
+### Requirement: Navigation labels may stay plain even when page titles are richer
 
-## Requirement: API details belong in examples or linked implementation docs
+Navigation labels in `notes/nav.yml` MAY use simple capability names (e.g., `材质系统`). The page title itself SHOULD be more expressive and explanatory.
 
-Concept pages MAY include short code examples, but SHALL NOT turn into symbol-by-symbol API references.
-
-When a page needs to mention concrete runtime objects, it SHOULD:
-
-- mention the key type names in prose
-- include one compact example when it improves understanding
-- link to subsystem docs or source files for deeper detail
-
-This keeps concepts readable while still anchored in the real codebase.
-
-## Requirement: Navigation labels may stay plain even when page titles are richer
-
-Navigation labels in `notes/nav.yml` MAY use simple capability names such as:
-
-- `资产系统`
-- `材质系统`
-- `渲染管线`
-
-The page title itself SHOULD be allowed to be more expressive and explanatory.
-
-This separation is intentional:
-
-- nav labels optimize for scanning
-- page titles optimize for understanding
+#### Scenario: Nav label vs page title
+- **WHEN** a page is added to navigation
+- **THEN** the nav label is short for scanning, while the page title is descriptive for understanding
 
 ## Acceptance Criteria
 
 A concept page is compliant with this spec if:
 
 - its primary narrative voice is `我们`, not `你`
+- abstract concepts are introduced with a concrete analogy before technical detail
+- structured comparisons use tables, not interleaved prose
+- configurable concepts include annotated YAML blocks showing runtime correspondence
+- it describes only current behavior with no references to removed designs
+- API surfaces with 3+ entries are presented as tables
+- it ends with 2–4 focused cross-links, not a reference dump
 - its title helps a reader understand the topic, not just classify it
-- its sections read as a guided explanation of the current engine
-- incomplete features are clearly marked and linked to requirements
-- it points readers to deeper implementation docs rather than trying to become a full reference manual

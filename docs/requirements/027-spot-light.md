@@ -49,4 +49,16 @@
 
 ## 实施状态
 
-未开始。
+2026-04-16 核查结果：**部分前置已具备，主体未开始**。
+
+### 已完成前置
+
+- `LightBase` 抽象已存在
+- `Scene` 已持有 `std::vector<LightBasePtr>`
+- `Scene::addLight(...)` / `getSceneLevelResources(...)` 已支持多 light object 容器
+
+### 尚未完成
+
+- 没有 `SpotLight` 类型
+- 没有 `SpotLightUBO`
+- 没有 shader / scene-level descriptor 对聚光灯的正式消费合同

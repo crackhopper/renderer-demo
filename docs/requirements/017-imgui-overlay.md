@@ -312,4 +312,8 @@ if (input.isUiCapturingMouse()) return;  // 跳过本帧
 
 ## 实施状态
 
-未开始。
+2026-04-16 核查结果：未开始。
+
+- `infra/gui` 只有初始化雏形
+- 还没有接入 `VulkanRenderer`
+- SDL 事件也没有 forward 给 ImGui

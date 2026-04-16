@@ -1,101 +1,118 @@
-# 材质实例如何承接运行时状态
+# MaterialInstance：运行时状态
 
-这篇文档只讨论 `MaterialInstance`。如果 `MaterialTemplate` 是蓝图，那么 `MaterialInstance` 就是当前 scene 真正会拿在手里的材质对象。
+如果 `MaterialTemplate` 是菜谱，`MaterialInstance` 就是端上桌的那道菜。它是 scene、render queue 和 backend 真正持有的材质对象。
 
-## 为什么 instance 是材质系统的运行时中心
+## 它保存了什么
 
-当前项目里，scene、render queue 和 backend 真正持有的材质类型，已经统一成 `MaterialInstance`。
+| 字段 | 职责 |
+|------|------|
+| `m_template` | 指向所属的菜谱 |
+| `m_bufferSlots` | 材质参数的 byte buffer（每个 material-owned UBO/SSBO 一个 slot） |
+| `m_textures` | 全局默认纹理资源 |
+| `m_passOverrides` | per-pass 的参数和纹理覆写 |
+| `m_enabledPasses` | 当前启用的 pass 子集 |
+| `m_passStateListeners` | pass 开关变化时通知 scene 的回调 |
 
-这意味着它要同时承接几类运行时责任：
+## Buffer Slot 是怎样构造出来的
 
-- 材质参数
-- 材质自己的 descriptor 资源
-- instance 级 pass enable 状态
-- 和 scene 结构性变化有关的通知
+Instance 构造时，从 enabled pass 的 shader 反射里收集所有 material-owned buffer binding：
 
-所以 `MaterialInstance` 不是一个薄壳。它是当前材质系统里最像“运行时对象”的那一层。
+1. 遍历每个 enabled pass 的 `getMaterialBindings(pass)`
+2. 对 `UniformBuffer` 和 `StorageBuffer` 类型的 binding 创建一个 `MaterialBufferSlot`
+3. 每个 slot 有自己的 byte buffer（零初始化）、dirty 标记和 `IRenderResource` 包装器
+4. 同名 buffer binding 跨 pass 必须布局一致，否则 assert
 
-## 它现在保存了哪些状态
+不支持的 descriptor 类型（如 standalone `Sampler`）会直接 FATAL。
 
-从类定义上看，`MaterialInstance` 当前主要持有：
+## 写参数：两种方式
 
-- `m_template`
-- `m_uboBuffer`
-- `m_uboBinding`
-- `m_uboResource`
-- `m_textures`
-- `m_enabledPasses`
-- `m_passStateListeners`
+**推荐方式**——按 binding 名 + member 名精确定位：
 
-这几块状态刚好对应几类职责：
+```cpp
+mat->setParameter(StringID("MaterialUBO"), StringID("roughness"), 0.5f);
+```
 
-- template 来源
-- 反射驱动的材质 UBO
-- 纹理资源
-- enabled pass 子集
-- 与 scene 的结构性传播回调
+**便利方式**——只按 member 名（单 buffer 时自动定位，多 buffer 时 assert）：
 
-## `MaterialUBO` 是怎样被构造出来的
+```cpp
+mat->setFloat(StringID("roughness"), 0.5f);
+```
 
-instance 构造时，会从 enabled pass shader 的反射结果里找 `MaterialUBO`。
+底层都走同一条路径：定位 buffer slot → 查反射 member → 验证类型 → `memcpy` 到 offset。
 
-这里有两个很重要的行为：
+纹理绑定：
 
-- 它优先看 enabled passes 对应的 shader
-- 如果多个 enabled pass 都有 `MaterialUBO`，它们的布局必须一致
+```cpp
+mat->setTexture(StringID("albedoMap"), textureSampler);
+```
 
-只有布局一致，instance 才会分配一份统一的 `m_uboBuffer` 和 `MaterialParameterDataResource`。如果找不到，再回退去看 template-level shader。
+## Per-Pass 参数覆写
 
-这说明当前实现默认接受这样的前提：
+有时候同一个参数在不同 pass 下需要不同的值。比如 Forward pass 开启法线贴图但 Shadow pass 关闭。
 
-一个材质实例虽然可以跨多个 pass 运行，但这些 enabled pass 对材质 UBO 的理解必须一致。
+```cpp
+mat->setParameter(Pass_Forward, StringID("MaterialUBO"), StringID("enableNormal"), 1);
+mat->setParameter(Pass_Shadow, StringID("MaterialUBO"), StringID("enableNormal"), 0);
+```
 
-## 运行时参数是怎样写进去的
+per-pass 覆写会复制一份全局 buffer slot 到 `m_passOverrides[pass]`，之后对该 pass 使用独立的 buffer。
 
-当前 `setVec4`、`setVec3`、`setFloat`、`setInt` 最终都会走同一条路径：
+在 YAML 里对应 `passes.<pass>.parameters`：
 
-- 根据名字在 `m_uboBinding->members` 里查成员
-- 验证类型是否匹配
-- 按反射 offset 把值 `memcpy` 到 `m_uboBuffer`
+```yaml
+parameters:                          # 全局默认
+  MaterialUBO.enableNormal: 0
 
-因此，这些 setter 不是手写 offset 的包装，而是完全依赖反射结果来定位材质参数。
+passes:
+  Forward:
+    parameters:                      # Forward pass 覆写
+      MaterialUBO.enableNormal: 1
+```
 
-`setTexture` 也是类似思路，只不过它现在走的是 template 级的按名查找缓存，再把资源存进 `m_textures`。
+## Pass 开关：为什么是结构变化
 
-这里要注意一个当前限制：这个查找还没有带上 pass 作用域，所以它默认假设不同 pass 中同名 sampler 的位置是一致的。只要模板开始承载多套 layout 不同的 pass，这个假设就会变得不可靠。这个缺口已经记录在 [`REQ-030`](../../requirements/030-pass-scoped-material-binding-resolution.md)。 
+```cpp
+mat->setPassEnabled(Pass_Shadow, false);
+```
 
-## pass enable 为什么算结构变化
-
-`MaterialInstance` 还有一组比普通参数更“重”的状态：
-
-- `isPassEnabled(pass)`
-- `setPassEnabled(pass, enabled)`
-- `getEnabledPasses()`
-
-这些状态之所以重要，是因为它们不只是影响 draw 值，而是会影响：
+pass 开关和普通参数写入不同——它影响的不只是 draw 值，而是：
 
 - 这个对象参加哪些 pass
-- `SceneNode` 需要校验哪些 pass
-- `getPassFlag()` 和 descriptor 资源在 pass 维度上的视图
+- SceneNode 需要校验哪些 pass
+- descriptor 资源的 pass 维度视图
 
-也因此，当前实现把 pass enable 变化通过 listener 通知给 scene，由 scene 去触发引用该材质实例的节点重验证。
+因此 pass 开关变化会通过 listener 通知 scene，触发引用该材质的节点重验证。`setFloat` / `setTexture` / `syncGpuData()` 不走这条传播链。
 
-普通的 `setFloat` / `setTexture` / `syncGpuData()` 则不走这条传播链。
+## Descriptor 资源的收集
 
-## descriptor 资源是怎样整理出来的
+`getDescriptorResources(pass)` 按目标 pass 的反射 bindings 收集材质资源：
 
-`MaterialInstance::getDescriptorResources()` 当前会返回一组确定顺序的资源：
+1. 枚举该 pass 的 material-owned bindings
+2. buffer binding → 优先取 pass override slot，没有则取全局 slot
+3. 纹理 binding → 优先取 pass override texture，没有则取全局纹理
+4. 按 `(set << 16 | binding)` 排序输出
 
-- 先是材质自己的 `MaterialUBO`
-- 再是按 `(set << 16 | binding)` 排序后的纹理资源
+这保证了不同 pass 可以看到不同的参数默认值，而不会被"最后一次写入"互相覆盖。
 
-这个排序很重要，因为它让 descriptor 列表在运行时保持稳定，不需要依赖 map 的遍历顺序。
+## 和 YAML 的对应
 
-## 往实现层再走一步
+```yaml
+parameters:                          # → 全局 buffer slot 默认值
+  MaterialUBO.baseColor: [0.8, 0.8, 0.8]
+  MaterialUBO.shininess: 12.0
 
-如果要继续跟代码，最值得看的就是：
+resources:                           # → 全局默认纹理
+  albedoMap: white
 
-- [material_instance.hpp](/home/lx/proj/renderer-demo/src/core/asset/material_instance.hpp:38)
-- [material_instance.cpp](/home/lx/proj/renderer-demo/src/core/asset/material_instance.cpp:40)
-- [`../../subsystems/material-system.md`](../../subsystems/material-system.md)
-- `openspec/specs/material-system/spec.md`
+passes:
+  Forward:
+    parameters:                      # → m_passOverrides[Forward].bufferSlots
+      MaterialUBO.enableNormal: 1
+    resources:                       # → m_passOverrides[Forward].textures
+      normalMap: "textures/brick_normal.png"
+```
+
+## 继续阅读
+
+- 代码入口：[material_instance.hpp](../../../src/core/asset/material_instance.hpp)
+- 实现层设计：[../../subsystems/material-system.md](../../subsystems/material-system.md)

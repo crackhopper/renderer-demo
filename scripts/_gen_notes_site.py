@@ -37,7 +37,10 @@ HEADING_RE = re.compile(r"^#\s+(.+?)\s*$")
 def discover_requirements() -> list[Path]:
     if not REQ_SRC_DIR.is_dir():
         return []
-    files = [p for p in REQ_SRC_DIR.iterdir() if p.is_file() and p.suffix == ".md"]
+    files = [
+        p for p in REQ_SRC_DIR.iterdir()
+        if p.is_file() and p.suffix == ".md" and p.name != "index.md"
+    ]
     files.sort(key=lambda p: p.name)
     return files
 
@@ -104,6 +107,20 @@ def sync_symlinks(req_files: list[Path]) -> None:
 
 def write_index(req_files: list[Path]) -> None:
     index_path = REQ_LINK_DIR / "index.md"
+    source_index = REQ_SRC_DIR / "index.md"
+
+    if source_index.is_file():
+        target = os.path.relpath(source_index, REQ_LINK_DIR)
+        if index_path.is_symlink() or index_path.exists():
+            try:
+                if index_path.is_symlink() and os.readlink(index_path) == target:
+                    return
+            except OSError:
+                pass
+            index_path.unlink()
+        index_path.symlink_to(target)
+        return
+
     lines = [
         "# 需求（进行中）",
         "",

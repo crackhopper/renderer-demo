@@ -57,4 +57,7 @@ Phase 1 roadmap 已经把 Environment Map Loader 和 IBL Prefilter 列为 REQ-10
 
 ## 实施状态
 
-未开始。
+2026-04-16 核查结果：未开始。
+
+- 代码里还没有 IBL scene-level resource
+- notes 侧也仍明确标注 IBL 尚未正式接入 scene

@@ -1,90 +1,66 @@
-# Shader 在材质系统里扮演什么角色
+# Shader 在材质中的角色
 
-这篇文档只讨论一个问题：在当前项目里，shader 为什么不是一个孤立资源，而是材质系统的一部分。
+## Shader 不只是 GPU 程序
 
-## 先看当前代码里的对象关系
+在材质系统里，shader 不只是"给 GPU 跑的代码"。它同时是一份**结构合同**：
 
-材质系统会同时接触到三层 shader 相关对象：
+- **反射 bindings** 告诉系统这个 shader 需要哪些 descriptor 资源（UBO、纹理等）
+- **vertex inputs** 告诉系统这个 shader 需要 mesh 提供哪些顶点属性
+- **shader name + variants** 参与 pipeline identity 和 render signature
 
-- `IShader`
-- `CompiledShader`
-- `ShaderProgramSet`
+所以材质系统关心的不是"一个 .spv 文件"，而是"名字 + variants + 编译结果 + 反射信息"的整体。
 
-它们的角色不同：
+## 三层 Shader 对象
 
-- `IShader` 是抽象接口，暴露 stages、reflection bindings、vertex inputs、binding 查询等能力
-- `CompiledShader` 是当前 `infra` 层的具体实现，承接编译和反射结果
-- `ShaderProgramSet` 是材质系统真正拿来参与 pass 定义和 render signature 的值对象
+| 对象 | 层 | 职责 |
+|------|---|------|
+| `IShader` | core 接口 | 暴露 stages、reflection bindings、vertex inputs、binding 查询 |
+| `CompiledShader` | infra 实现 | 承接 `ShaderCompiler` 编译和 `ShaderReflector` 反射的结果 |
+| `ShaderProgramSet` | 材质值对象 | 把 shader 名、enabled variants 和 `IShaderPtr` 打包，嵌入 `MaterialPassDefinition` |
 
-所以，从材质系统视角看，shader 不是“只有一个编译结果文件”，而是“名字 + variants + 编译结果 + 反射信息”的组合。
+`ShaderProgramSet` 是材质系统真正和 pass 绑定的入口。它一头连着 loader 的编译结果，一头连着 render signature。
 
-## 为什么材质系统必须关心 shader
+## 反射 binding 与归属合同
 
-因为材质系统真正要决定的，不只是“选一个 shader 文件”，而是：
+shader 反射出的 bindings 分为两类：
 
-- 这个 pass 用哪组 shader
-- 开了哪些 variants
-- 反射出来有哪些 binding 和 vertex input 要求
-- 这些要求是否会影响 scene 校验和 pipeline 身份
+| 归属 | 判定方式 | 例子 | 谁提供资源 |
+|------|---------|------|-----------|
+| 系统保留 | `isSystemOwnedBinding()` 返回 true | `CameraUBO`、`LightUBO`、`Bones` | Scene / Skeleton |
+| 材质所有 | 其余所有 binding | `MaterialUBO`、`albedoMap`、`SurfaceParams` | MaterialInstance |
 
-如果 shader 只是一个外部资源，而不进入材质系统，我们就很难在 pass 维度上把这些约束收拢起来。
+这个合同定义在 `shader_binding_ownership.hpp`。保留名字集是固定的三个，扩展需要新 spec。
 
-## `ShaderProgramSet` 在这里很关键
+如果 shader 声明了一个保留名字但类型不对（比如 `CameraUBO` 声明为 `Texture2D`），SceneNode 验证时会 FATAL——这是 shader authoring error。
 
-当前项目里，`ShaderProgramSet` 保存三件事：
+## 哪些 binding 是"必须绑定"的
 
-- `shaderName`
-- `variants`
-- `shader`
+对于材质侧 binding：
 
-它一头连着 loader 生成的编译结果，一头连着 `MaterialPassDefinition` 和 render signature。
+- **buffer 类型**（`UniformBuffer`、`StorageBuffer`）是结构性必需的——shader 需要一块内存来读参数，MaterialInstance 构造时会自动创建对应的 buffer slot
+- **纹理类型**（`Texture2D`、`TextureCube`）不一定必须绑定——shader 可以通过运行时参数（如 `enableAlbedo`）控制是否真的采样
 
-因此，材质系统里真正和 pass 绑定的，不是“单个 `IShaderPtr`”，而是 `ShaderProgramSet`。
+例如 `blinnphong_0.frag` 里的 `albedoMap` 和 `normalMap` 就是可选的 sampled resource。缺省未绑定不会导致 SceneNode 判非法。
 
-这样做的价值很明显：
+## Shader 的完整路径
 
-- shader 名字会进入 render signature
-- enabled variants 也会进入 render signature
-- 最终用于 scene 校验和 pipeline 身份的，不只是 shader 字节码，而是整个“程序集合”的形状
+1. Loader 决定 shader 名和 variants（来自 YAML 或 C++ 代码）
+2. `ShaderCompiler` 编译 GLSL → SPIR-V
+3. `ShaderReflector` 反射出 binding 列表和 vertex input 列表
+4. `CompiledShader` 承接编译和反射结果
+5. `ShaderProgramSet` 把名字、variants 和 shader 绑在一起
+6. `MaterialPassDefinition` 把 `ShaderProgramSet` 作为某个 pass 的 shader 配置
 
-## 反射为什么在这一层这么重要
+在 YAML 材质文件里，对应关系是：
 
-当前 `IShader` 会暴露两类对材质系统特别重要的反射信息：
+```yaml
+shader: blinnphong_0        # → shader 名，用来定位 .vert / .frag
+variants:                    # → ShaderProgramSet.variants
+  USE_LIGHTING: true
+  USE_UV: true
+```
 
-- `getReflectionBindings()`
-- `getVertexInputs()`
+## 继续阅读
 
-这两类信息会分别流向两条链：
-
-- binding 反射决定 `MaterialUBO`、纹理 sampler、scene-level 资源如何按名字对齐
-- vertex input 反射决定 `SceneNode` 如何校验 mesh 和 shader 的结构匹配
-
-也就是说，shader 在这里不是只负责“给 GPU 跑代码”，而是还承担了一份结构合同。
-
-## `MaterialUBO` 这个名字为什么是硬约定
-
-当前 `MaterialInstance` 在构造时，会遍历 shader 反射 binding，专门找名字等于 `MaterialUBO` 的 uniform block。
-
-这意味着：
-
-- 材质系统并不是通过额外配置告诉 instance “哪个 block 是材质自己的 UBO”
-- 它依赖的是 shader 里那个 block 的名字约定
-
-这条规则已经写进当前实现和 spec 里，所以在这个项目里，`MaterialUBO` 不是随手起的名字，而是一条材质系统合同。
-
-## 往实现层再走一步
-
-当前这条 shader 路径大致是：
-
-1. loader 决定 shader 名和 variants
-2. `ShaderCompiler` 编译出 stages
-3. `ShaderReflector` 反射出 binding 和 vertex input
-4. `CompiledShader` 承接这些结果
-5. `ShaderProgramSet` 把 shader 名、variants 和 `CompiledShader` 绑到一起
-6. `MaterialPassDefinition` 再把它作为某个 pass 的 shader 配置保存下来
-
-继续展开时，可以参考：
-
-- [shader.hpp](/home/lx/proj/renderer-demo/src/core/asset/shader.hpp:118)
-- [`../../subsystems/shader-system.md`](../../subsystems/shader-system.md)
-- [`../../subsystems/material-system.md`](../../subsystems/material-system.md)
+- shader 反射接口：[shader.hpp](../../../src/core/asset/shader.hpp)
+- shader 系统设计文档：[../../subsystems/shader-system.md](../../subsystems/shader-system.md)

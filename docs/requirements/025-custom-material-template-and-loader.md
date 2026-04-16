@@ -64,9 +64,19 @@ loader 必须至少支持以下两种入口之一，并在文档中写死：
 
 ## 依赖
 
-- [`REQ-022`](022-material-pass-selection.md)：instance 级 pass enable/disable
+- [`REQ-022`](finished/022-material-pass-selection.md)：instance 级 pass enable/disable
 - `openspec/specs/material-system/spec.md`
 
 ## 实施状态
 
-未开始。
+2026-04-16 核查结果：**大部分已完成，保留少量收尾项**。
+
+### 已完成
+
+- 代码已经同时支持 `MaterialTemplate` / `MaterialPassDefinition` / `MaterialInstance` 的直接 C++ 组装路径
+- `loadGenericMaterial(materialPath)` 已提供统一的 `.material` 加载入口
+- `notes/concepts/material/custom-template.md` 已把“写 shader -> 写 `.material` -> 调 loader”收敛为稳定路径
+
+### 剩余项
+
+- 补一个仓库内真实存在、不是 `blinnphong_0` 的自定义材质模板示例，避免该需求完全停留在文档层面的概念例子

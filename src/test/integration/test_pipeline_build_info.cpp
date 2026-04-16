@@ -107,7 +107,7 @@ buildItem(PrimitiveTopology topo = PrimitiveTopology::TriangleList) {
 
   auto shader =
       std::make_shared<FakeShader>(std::move(bindings), std::move(stages));
-  auto tmpl = MaterialTemplate::create("fake_shader", shader);
+  auto tmpl = MaterialTemplate::create("fake_shader");
 
   ShaderProgramSet set;
   set.shaderName = "fake_shader";

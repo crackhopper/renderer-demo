@@ -199,7 +199,7 @@
 ## 依赖
 
 - REQ-021 已经确立 `SceneNode` 为主路径并把对象合法性校验前移
-- REQ-022 确立了 material pass enable/disable 与 `SceneNode` 的交互边界
+- [`REQ-022`](finished/022-material-pass-selection.md) 已确立 material pass enable/disable 与 `SceneNode` 的交互边界
 - 当前 `notes/subsystems/scene.md` 已把 `RenderableSubMesh` 定义为兼容实现，这为删除 legacy 抽象提供了文档前提
 
 ## 下游工作
@@ -217,6 +217,16 @@
 
 ## 实施状态
 
-- 日期：2026-04-15
-- 状态：Draft
-- 结论：已确认 `RenderableSubMesh` 在当前代码中属于 legacy 兼容抽象，建议立项收敛并删除
+2026-04-16 核查结果：**部分完成，继续保留为进行中需求**。
+
+### 已完成
+
+- `SceneNode` 已是当前主路径，具备 pass-level validated cache
+- `SceneNode::supportsPass(pass)` 已基于 enabled pass + validated cache
+- `notes/concepts/scene/index.md` 和 `notes/subsystems/scene.md` 已把 `RenderableSubMesh` 标为 legacy
+
+### 尚未完成
+
+- `src/core/scene/object.hpp` / `.cpp` 中仍保留 `RenderableSubMesh`
+- `buildLegacyValidatedData(...)` 仍存在
+- 多个集成测试、tutorial、示例代码仍直接构造 `RenderableSubMesh`

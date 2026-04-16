@@ -1,47 +1,98 @@
-# 怎样定义自己的材质模板
+# 创建自定义材质
 
-这篇文档讨论的是“如果不想只用现成的 `loadBlinnPhongMaterial()`，当前代码允许我们怎样自己定义一张材质模板”。
+## 两条路径
 
-## 先看今天已经存在的主路径
+| 路径 | 适用场景 |
+|------|---------|
+| **YAML**（推荐） | 新增普通材质（PBR、unlit、toon 等），快速迭代默认值 |
+| **C++** | 需要自定义 variant 校验、特殊编译逻辑或程序化生成 |
 
-虽然项目里目前最成熟的入口仍然是 `loadBlinnPhongMaterial()`，但从代码结构上说，自定义材质模板这件事并不是未来想法，而是已经有基础路径：
+## YAML 路径
 
-1. 准备 shader 和 variants
-2. 编译并反射得到 `CompiledShader`
-3. 创建 `MaterialTemplate`
-4. 为某个 pass 填 `MaterialPassDefinition`
-5. `buildBindingCache()`
-6. 基于 template 创建 `MaterialInstance`
+三步：写 shader → 写 `.material` → 调用 `loadGenericMaterial(path)`。
 
-也就是说，今天缺的不是“底层根本做不到”，而是“还没有把这条路径收敛成一个统一、面向使用者的 loader 契约”。
+### 最小示例
 
-## `blinn_phong_material_loader.cpp` 已经给出了最小样板
+```yaml
+shader: blinnphong_0
 
-当前最接近“自定义模板样板”的真实代码，其实就在 [blinn_phong_material_loader.cpp](/home/lx/proj/renderer-demo/src/infra/material_loader/blinn_phong_material_loader.cpp:76) 里。
+variants:
+  USE_LIGHTING: true
 
-这段代码做了几件很有代表性的事：
+passes:
+  Forward:
+    renderState:
+      cullMode: Back
+      depthTest: true
+      depthWrite: true
+  Shadow:
+    shader: shadow_depth_only       # Shadow 用完全不同的 shader
 
-- 规范化 forward variants
-- 校验 variant 组合是否合法
-- 编译 `blinnphong_0.vert/.frag`
-- 反射出 binding 和 vertex input
-- 创建 `MaterialTemplate`
-- 组装 `ShaderProgramSet`
-- 构造 `MaterialPassDefinition`
-- `tmpl->setPass(Pass_Forward, entry)`
-- `tmpl->buildBindingCache()`
-- 再创建 `MaterialInstance` 并写默认参数
+parameters:
+  MaterialUBO.baseColor: [0.8, 0.8, 0.8]
+  MaterialUBO.shininess: 12.0
+  MaterialUBO.specularIntensity: 1.0
 
-换句话说，这个 loader 虽然只服务 `blinnphong_0`，但已经把“自定义模板”最关键的搭建过程演示出来了。
+resources:
+  albedoMap: white
+```
 
-## 如果今天手工定义一张模板，最小步骤是什么
+### Schema 速查
 
-按当前实现，最小步骤大致可以写成：
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| `shader` | 是 | 全局默认 shader 名（对应 `shaders/glsl/<name>.vert/.frag`） |
+| `variants` | 否 | 全局 shader variants（`NAME: true/false`） |
+| `parameters` | 否 | 全局默认参数，格式 `bindingName.memberName: value` |
+| `resources` | 否 | 全局默认纹理，值为文件路径或占位名 |
+| `passes` | 否 | per-pass 配置，省略则默认一个 Forward pass |
+| `variantRules` | 否 | variant 依赖规则列表 |
+
+每个 pass 可以有 `shader`（覆盖全局 shader）、`renderState`、`variants`（合并全局）、`parameters`（覆写全局）、`resources`（覆写全局）。
+
+### Variant 依赖规则
+
+`variantRules` 用来声明 variant 之间的依赖关系。每条规则：如果 `requires` 中的 variant 全部启用，则 `depends` 中的 variant 也必须全部启用，否则 FATAL。
+
+```yaml
+variantRules:
+  - requires: [USE_NORMAL_MAP]
+    depends: [USE_LIGHTING, USE_UV]
+  - requires: [USE_SKINNING]
+    depends: [USE_LIGHTING]
+```
+
+### 占位纹理
+
+| 名字 | RGBA | 用途 |
+|------|------|------|
+| `white` | (255, 255, 255, 255) | 默认 albedo |
+| `black` | (0, 0, 0, 255) | 默认 emissive / AO |
+| `normal` | (128, 128, 255, 255) | 平坦切线空间法线 |
+
+### 验证规则
+
+- 参数的 `bindingName` 和 `memberName` 必须在 shader 反射中存在，否则 FATAL
+- 资源的 binding 名必须在 shader 反射中存在，否则 FATAL
+- YAML 不参与 ownership 判定（归属由 `shader_binding_ownership.hpp` 决定）
+- YAML 中没列出的合法参数仍然存在，只是零初始化，运行时可以 `setParameter`
+
+参考示例：[`materials/blinnphong_lit.material`](../../../materials/blinnphong_lit.material)
+
+## C++ 路径
 
 ```cpp
-auto shader = std::make_shared<CompiledShader>(...);
-auto tmpl = MaterialTemplate::create("my_material", shader);
+// 1. 编译 shader
+auto compiled = ShaderCompiler::compileProgram(vert, frag, variants);
+auto bindings = ShaderReflector::reflect(compiled.stages);
+auto vertexInputs = ShaderReflector::reflectVertexInputs(compiled.stages);
+auto shader = std::make_shared<CompiledShader>(
+    std::move(compiled.stages), bindings, vertexInputs, "my_material");
 
+// 2. 创建 template（只需要名字，shader 在 pass 级别指定）
+auto tmpl = MaterialTemplate::create("my_material");
+
+// 3. 组装 pass（shader 绑定在这里）
 ShaderProgramSet programSet;
 programSet.shaderName = "my_material";
 programSet.variants = variants;
@@ -53,42 +104,18 @@ entry.renderState = RenderState{};
 entry.buildCache();
 
 tmpl->setPass(Pass_Forward, std::move(entry));
-tmpl->buildBindingCache();
+tmpl->buildBindingCache();  // 不能漏，否则 per-pass binding 列表为空
 
+// 4. 创建 instance 并设默认参数
 auto instance = MaterialInstance::create(tmpl);
+instance->setParameter(StringID("MyUBO"), StringID("roughness"), 0.5f);
+instance->syncGpuData();
 ```
 
-这里最容易忽略的有两点：
+C++ 路径的完整样板可参考 `materials/blinnphong_default.material` 的 YAML 等价逻辑。
 
-- `ShaderProgramSet` 才是 pass 真正绑定的 shader 入口
-- `buildBindingCache()` 不能漏，否则后续名字查找会不完整
+## 继续阅读
 
-## 当前还缺什么
-
-虽然底层路径已经存在，但从“文档和使用者入口”的角度看，当前还差一层正式约定：
-
-- loader 到底应该返回 template、instance，还是两者都暴露
-- 自定义模板怎样成为稳定 API，而不是散落在具体 loader 里
-- 什么东西属于 template 构造期，什么东西属于 instance 运行时
-
-这个缺口已经单独挂在 [`REQ-025`](../../requirements/025-custom-material-template-and-loader.md)。
-
-## 现在写这篇文档的意义是什么
-
-意义不是说“自定义模板已经有漂亮 API 了”，而是把今天真实存在的能力边界讲清楚：
-
-- 底层已经能定义自定义模板
-- 最成熟的例子是 `blinn_phong_material_loader.cpp`
-- 还缺一层统一、正式、面向使用者的入口约定
-
-这能让后续把 `REQ-025` 落地时，有一个明确的起点，而不是重新发明材质系统的分层。
-
-## 往实现层再走一步
-
-继续展开时，可以参考：
-
-- [blinn_phong_material_loader.cpp](/home/lx/proj/renderer-demo/src/infra/material_loader/blinn_phong_material_loader.cpp:76)
-- [material_template.hpp](/home/lx/proj/renderer-demo/src/core/asset/material_template.hpp:13)
-- [material_pass_definition.hpp](/home/lx/proj/renderer-demo/src/core/asset/material_pass_definition.hpp:103)
-- [`../../subsystems/material-system.md`](../../subsystems/material-system.md)
-- [`REQ-025`](../../requirements/025-custom-material-template-and-loader.md)
+- [generic_material_loader.hpp](../../../src/infra/material_loader/generic_material_loader.hpp)
+- [placeholder_textures.hpp](../../../src/infra/texture_loader/placeholder_textures.hpp)
+- `openspec/specs/material-asset-loader/spec.md`

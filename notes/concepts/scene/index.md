@@ -61,7 +61,7 @@
 - [资产系统](../assets/index.md) 提供 mesh、texture、skeleton 等资源入口
 - [材质系统](../material/index.md) 提供 `MaterialInstance` 和 pass 语义
 - [相机系统](../camera/index.md) / [光源系统](../light/index.md) 提供 scene-level 资源
-- [渲染管线](../pipeline/index.md) 再把这些结果往后整理成 `RenderingItem` 和 pipeline 构建输入
+- [材质系统里的 Pipeline 说明](../material/what-is-pipeline.md) 再把这些结果往后整理成 `RenderingItem` 和 pipeline 构建输入
 
 ## 往实现层再走一步
 

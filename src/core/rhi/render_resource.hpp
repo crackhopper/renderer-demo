@@ -13,6 +13,7 @@ enum class ResourceType : u8 {
   VertexBuffer,
   IndexBuffer,
   UniformBuffer,
+  StorageBuffer,
   CombinedImageSampler,
   Special,
   Count

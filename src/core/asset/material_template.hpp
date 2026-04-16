@@ -1,12 +1,15 @@
 #pragma once
 
 #include "core/asset/material_pass_definition.hpp"
+#include "core/asset/shader_binding_ownership.hpp"
 
 #include <functional>
+#include <iostream>
 #include <memory>
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace LX_core {
 
@@ -16,15 +19,13 @@ class MaterialTemplate : public std::enable_shared_from_this<MaterialTemplate> {
 public:
   using Ptr = std::shared_ptr<MaterialTemplate>;
 
-  MaterialTemplate(Token, std::string name, IShaderPtr shader)
-      : m_name(std::move(name)), m_shader(std::move(shader)) {}
+  MaterialTemplate(Token, std::string name)
+      : m_name(std::move(name)) {}
 
-  static Ptr create(std::string name, IShaderPtr shader) {
-    return std::make_shared<MaterialTemplate>(Token{}, std::move(name),
-                                              std::move(shader));
+  static Ptr create(std::string name) {
+    return std::make_shared<MaterialTemplate>(Token{}, std::move(name));
   }
 
-  IShaderPtr getShader() const { return m_shader; }
   const std::string &getName() const { return m_name; }
 
   void setPass(StringID pass, MaterialPassDefinition definition) {
@@ -47,26 +48,52 @@ public:
   }
 
   void buildBindingCache() {
-    m_bindingCache.clear();
-    const auto addBindings = [&](const IShaderPtr &shader) {
-      if (!shader)
-        return;
-      for (const auto &binding : shader->getReflectionBindings()) {
-        m_bindingCache[StringID(binding.name)] = binding;
-      }
-    };
+    m_passMaterialBindings.clear();
 
-    addBindings(m_shader);
-    for (const auto &[_, definition] : m_passes) {
-      addBindings(definition.shaderSet.getShader());
+    for (const auto &[pass, definition] : m_passes) {
+      auto shader = definition.shaderSet.getShader();
+      if (!shader)
+        continue;
+      auto &matBindings = m_passMaterialBindings[pass];
+      for (const auto &binding : shader->getReflectionBindings()) {
+        if (isSystemOwnedBinding(binding.name))
+          continue;
+        matBindings.push_back(binding);
+      }
     }
+
+    checkCrossPassBindingConsistency();
   }
 
+  const std::vector<ShaderResourceBinding> &
+  getMaterialBindings(StringID pass) const {
+    static const std::vector<ShaderResourceBinding> kEmpty;
+    auto it = m_passMaterialBindings.find(pass);
+    return it != m_passMaterialBindings.end() ? it->second : kEmpty;
+  }
+
+  /// Search all passes for a material-owned binding by name.
+  /// Returns the first match. Asserts if the same name appears with
+  /// conflicting types across passes.
   std::optional<std::reference_wrapper<const ShaderResourceBinding>>
-  findBinding(StringID id) const {
-    auto it = m_bindingCache.find(id);
-    if (it != m_bindingCache.end())
-      return it->second;
+  findMaterialBinding(StringID id) const {
+    const ShaderResourceBinding *found = nullptr;
+    for (const auto &[_, bindings] : m_passMaterialBindings) {
+      for (const auto &binding : bindings) {
+        if (StringID(binding.name) != id)
+          continue;
+        if (!found) {
+          found = &binding;
+        } else {
+          assert(found->type == binding.type &&
+                 "findMaterialBinding: same name with different types across "
+                 "passes");
+        }
+        break;
+      }
+    }
+    if (found)
+      return *found;
     return std::nullopt;
   }
 
@@ -76,10 +103,37 @@ public:
   }
 
 private:
+  void checkCrossPassBindingConsistency() const {
+    // Collect first-seen binding per name across all passes.
+    std::unordered_map<std::string, std::pair<StringID, const ShaderResourceBinding *>>
+        seen; // name -> (first pass, first binding)
+    for (const auto &[pass, bindings] : m_passMaterialBindings) {
+      for (const auto &binding : bindings) {
+        auto it = seen.find(binding.name);
+        if (it == seen.end()) {
+          seen[binding.name] = {pass, &binding};
+          continue;
+        }
+        const auto *first = it->second.second;
+        if (first->type != binding.type) {
+          std::cerr << "WARN [MaterialTemplate] cross-pass binding '"
+                    << binding.name << "' type mismatch between passes\n";
+        } else if (first->size != binding.size) {
+          std::cerr << "WARN [MaterialTemplate] cross-pass binding '"
+                    << binding.name << "' size mismatch: " << first->size
+                    << " vs " << binding.size << "\n";
+        } else if (first->members != binding.members) {
+          std::cerr << "WARN [MaterialTemplate] cross-pass binding '"
+                    << binding.name << "' member layout mismatch\n";
+        }
+      }
+    }
+  }
+
   std::string m_name;
-  IShaderPtr m_shader;
   std::unordered_map<StringID, MaterialPassDefinition, StringID::Hash> m_passes;
-  std::unordered_map<StringID, ShaderResourceBinding> m_bindingCache;
+  std::unordered_map<StringID, std::vector<ShaderResourceBinding>, StringID::Hash>
+      m_passMaterialBindings;
 };
 
 } // namespace LX_core

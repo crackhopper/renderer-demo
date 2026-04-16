@@ -59,7 +59,7 @@ while (running) {
 - [场景对象](scene/index.md)：提供当前 scene 及其结构
 - [相机系统](camera/index.md) / [光源系统](light/index.md)：在 update 阶段被修改
 - [材质系统](material/index.md)：普通参数更新在每帧路径里推进
-- [渲染管线](pipeline/index.md)：需要结构性重建时，应该走显式 rebuild，而不是混入普通 update
+- [材质系统里的 Pipeline 说明](material/what-is-pipeline.md)：需要结构性重建时，应该走显式 rebuild，而不是混入普通 update
 
 ## 往实现层再走一步
 

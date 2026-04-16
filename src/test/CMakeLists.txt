@@ -16,7 +16,8 @@ set(TEST_INTEGRATION_EXE_LIST
   test_scene_node_validation
   test_pipeline_cache
   test_engine_loop
-  test_blinn_phong_material_loader
+  test_generic_material_loader
+  test_material_variant_rules
 
   # test_render_sphere
   # test_render_model

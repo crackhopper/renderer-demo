@@ -78,7 +78,7 @@ struct Fixture {
     f.mesh = Mesh::create(f.vb, f.ib);
 
     auto shader = std::make_shared<FakeShader>();
-    f.tmpl = MaterialTemplate::create(shaderName, shader);
+    f.tmpl = MaterialTemplate::create(shaderName);
 
     ShaderProgramSet ps;
     ps.shaderName = shaderName;

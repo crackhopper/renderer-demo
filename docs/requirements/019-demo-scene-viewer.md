@@ -339,4 +339,7 @@ ninja demo_scene_viewer
 
 ## 实施状态
 
-未开始。
+2026-04-16 核查结果：未开始。
+
+- 目前仍只有 `src/test/test_render_triangle.cpp`
+- 尚无 `src/demos/scene_viewer/`

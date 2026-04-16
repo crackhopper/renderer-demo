@@ -134,17 +134,23 @@ loadPbrMaterial(LX_core::ResourcePassFlag passFlag) {
 | `MaterialTemplate::create` | `core/asset/material_template.hpp` | 蓝图：一个材质模板可以实例化多次 |
 | `setPass(Pass_Forward, entry)` | 同上 | 某个 pass 下用哪套 shader + render state |
 | `buildBindingCache()` | 同上 | 把反射结果做成 `StringID -> ShaderResourceBinding` 查表 |
-| `MaterialInstance::create` | 同上 | 真正分配 std140 字节 buffer 的 owner |
+| `MaterialInstance::create` | 同上 | 真正分配 material-owned buffer slots 并持有运行时资源状态 |
 | `setVec3 / setFloat` | 同上 | 对照反射 member 偏移量，按类型校验写入 |
-| `syncGpuData()` | 同上 | 标 `m_uboResource` dirty，下一帧 `syncResource` 推 GPU |
+| `syncGpuData()` | 同上 | 标记所有 dirty 的参数资源，下一帧 `syncResource` 推 GPU |
 
-### MaterialUBO 名字约定
+### 材质 binding 名字约定
 
 再强调一次：
 
-> **`MaterialUBO` 必须叫这个名字**。`MaterialInstance` 会按这个名字从反射结果里定位自己的 CPU 侧字节缓冲区。shader 里命名成别的（比如 `PbrParams`）会导致找不到 UBO binding，后面的 setter 直接失效。
+> **`MaterialUBO` 不再是硬约定。** `MaterialInstance` 现在会把所有非系统保留的 material-owned buffer binding 都纳入自己的参数接口。你可以把块名写成 `PbrParams`、`SurfaceParams`，只要 loader / 调用方按同一个 `bindingName.memberName` 去写值即可。
 
-`layout(...) uniform MaterialUBO { ... } material;` 里，`material` 是实例名，可以改；`MaterialUBO` 是块名，不能改。
+真正的硬约定是系统保留名字：
+
+- `CameraUBO`
+- `LightUBO`
+- `Bones`
+
+这些名字属于 engine contract，不能随意改成别的语义。
 
 ### 纹理绑定也要一起考虑
 

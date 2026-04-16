@@ -125,6 +125,21 @@ else()
 endif()
 
 # -------------------------------
+# yaml-cpp (material asset files)
+# -------------------------------
+include(FetchContent)
+set(YAML_CPP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(YAML_CPP_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+set(YAML_CPP_BUILD_CONTRIB OFF CACHE BOOL "" FORCE)
+fetchcontent_declare(
+  yaml-cpp
+  GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
+  GIT_TAG        0.8.0
+  GIT_SHALLOW    TRUE
+)
+fetchcontent_makeavailable(yaml-cpp)
+
+# -------------------------------
 # Vulkan
 # -------------------------------
 find_package(Vulkan REQUIRED)
@@ -166,9 +181,10 @@ set(INFRA_LIB LX_Infra CACHE INTERNAL "Infra library name")
 
 # Explicitly list source files to avoid picking up example files and unwanted backends
 set(INFRA_SOURCES
-    material_loader/blinn_phong_material_loader.cpp
+    material_loader/generic_material_loader.cpp
     gui/imgui_gui.cpp
     texture_loader/texture_loader.cpp
+    texture_loader/placeholder_textures.cpp
     mesh_loader/obj_mesh_loader.cpp
     mesh_loader/gltf_mesh_loader.cpp
     shader_compiler/shader_compiler.cpp
@@ -192,6 +208,7 @@ target_link_libraries(${INFRA_LIB}
   imgui
   ${SHADERC_LIB}
   ${SHADERC_DEPS}
+  yaml-cpp::yaml-cpp
 )
 
 # SPIRV-Cross: FetchContent → CMake targets (PUBLIC so final exes resolve symbols).

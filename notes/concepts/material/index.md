@@ -1,66 +1,38 @@
 # 材质系统总览
 
-材质系统在这个项目里不是一个单独类，而是一条从 shader、pass、render state 到运行时参数与纹理资源的完整链路。
+几何告诉引擎"这个东西长什么形状"，材质告诉引擎"这个东西该怎么渲染"：用哪组 shader、跑哪些 pass、什么 render state、提供哪些参数和纹理。
 
-如果只保留一句话来理解它，那么就是：
+一句话概括当前设计：
 
-> 我们先用 `MaterialTemplate` 定义“一个材质有哪些 pass、每个 pass 长什么样”，再用 `MaterialInstance` 承接运行时参数、纹理和 pass 开关，最后把这些结果交给 scene 与 pipeline 链路消费。
+> `MaterialTemplate` 是菜谱——规定了一道菜要哪些步骤（pass）和食材类型（shader / variants / render state）。`MaterialInstance` 是上桌的那道菜——填入了具体的调料用量（参数值）和实际食材（纹理）。
 
-## 先建立一个整体图景
+## 核心对象
 
-当前项目里的材质系统主要由 4 个核心部件组成：
+| 对象 | 职责 | 类比 |
+|------|------|------|
+| `MaterialTemplate` | 定义有哪些 pass，每个 pass 的 shader、variants、render state | 菜谱 |
+| `MaterialPassDefinition` | 单个 pass 的完整配置（shader + render state + 反射 binding 缓存） | 菜谱里的一个步骤 |
+| `MaterialInstance` | 运行时参数值、纹理资源、per-pass 覆写、pass 开关 | 上桌的菜 |
+| `ShaderProgramSet` | 把 shader 名、variants 和编译后的 shader 打包成一个值对象 | 步骤里标注的"用哪把刀、什么火候" |
 
-- `MaterialTemplate`
-- `MaterialPassDefinition`
-- `MaterialInstance`
-- `ShaderProgramSet`
+另外三个支撑组件：
 
-它们各自分工不同：
+- **`shader_binding_ownership`** — 区分哪些 binding 归系统（`CameraUBO`、`LightUBO`、`Bones`），哪些归材质
+- **`GenericMaterialLoader`** — 从 `.material` 直接创建完整材质，不用写 C++
+- **`PlaceholderTextures`** — 内置 1×1 占位纹理（`white`、`black`、`normal`）
 
-- `MaterialTemplate` 负责蓝图
-- `MaterialPassDefinition` 负责单个 pass 的 shader / variants / render state
-- `MaterialInstance` 负责运行时参数、纹理和 pass enable 状态
-- `ShaderProgramSet` 负责把 shader 名、variants 和编译后的 shader 绑定到一起
+## 阅读顺序
 
-## 这套系统为什么重要
+1. [模板与 Pass：材质的结构定义](template-blueprint.md) — 先理解"菜谱"
+2. [Shader 在材质中的角色](shader.md) — 理解反射、variants 和 binding 归属
+3. [什么是 Pipeline](what-is-pipeline.md) — 先把“渲染结构的复用单位”理解清楚
+4. [模板如何影响 Pipeline](template-and-pipeline.md) — 再看模板里的哪些部分会进入 pipeline
+5. [MaterialInstance：运行时状态](material-instance.md) — 理解参数写入、资源绑定和 pass 开关
+6. [创建自定义材质](custom-template.md) — YAML 路径和 C++ 路径
 
-几何只能告诉引擎“这个对象长什么样”，还不能回答“它应该怎样被渲染”。
+## 权威参考
 
-材质系统补上的就是这一层：
-
-- 用哪组 shader
-- 跑哪些 pass
-- 用什么 render state
-- 提供哪些材质参数和纹理
-- 哪些变化只改值，哪些变化会改结构
-
-也正因为这一层存在，scene 才能在前端完成结构校验，pipeline 链路也才能拿到稳定的身份和构建输入。
-
-## 建议的阅读顺序
-
-如果准备把这一组文档展开来读，按下面顺序最顺：
-
-1. [材质模板：一张蓝图如何描述多个 pass](template-blueprint.md)
-2. [Shader 在材质系统里扮演什么角色](shader.md)
-3. [材质模板为什么会影响 pipeline](template-and-pipeline.md)
-4. [材质实例如何承接运行时状态](material-instance.md)
-5. [怎样定义自己的材质模板](custom-template.md)
-
-## 当前代码已经走到哪一步
-
-当前实现已经不是概念草图，而是主路径的一部分：
-
-- `MaterialTemplate`
-- `MaterialPassDefinition`
-- `MaterialInstance`
-- instance 级 pass enable / disable
-- 反射驱动的 `MaterialUBO` 写入
-- 按 pass 的 `RenderState` / render signature / `PipelineKey` 链路
-
-这些都已经在当前代码里工作。
-
-对应的权威约束主要在：
-
-- [`../../subsystems/material-system.md`](../../subsystems/material-system.md)
-- `openspec/specs/material-system/spec.md`
-- [`../pipeline/index.md`](../pipeline/index.md)
+- [`../../subsystems/material-system.md`](../../subsystems/material-system.md) — 实现层设计文档
+- `openspec/specs/material-system/spec.md` — 材质系统 spec
+- `openspec/specs/shader-binding-ownership/spec.md` — binding 归属 spec
+- `openspec/specs/material-asset-loader/spec.md` — 通用 loader spec

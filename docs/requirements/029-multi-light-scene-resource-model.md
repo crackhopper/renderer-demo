@@ -61,4 +61,16 @@
 
 ## 实施状态
 
-未开始。
+2026-04-16 核查结果：**部分前置已完成，统一 light set 尚未开始**。
+
+### 已完成前置
+
+- `Scene` 已能持有多个 `LightBase`
+- `Scene::getSceneLevelResources(pass, target)` 已按容器顺序追加多个 light 资源
+- `DirectionalLight` 已具备 pass 参与规则
+
+### 尚未完成
+
+- 还没有统一的 GPU multi-light buffer / light set
+- 还没有固定上限与裁剪/排序规则
+- 多光源数量变化与 shader 合同之间还没有正式 spec

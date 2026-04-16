@@ -36,7 +36,7 @@
 - [Tutorial](tutorial/00-overview.md)：从零搭一个 PBR 旋转立方体，按真实代码走完整链路。
 - [概念 / 资产系统](concepts/assets/index.md)：理解引擎当前能加载哪些资源，以及网格对象、纹理、材质怎样进入运行时。
 - [概念 / 场景对象](concepts/scene/index.md)：从使用者视角理解 `Scene` / `SceneNode` 与场景组织方式。
-- [概念 / 渲染管线](concepts/pipeline/index.md)：理解 `PipelineKey`、构建输入与 cache 复用链路。
+- [概念 / 材质系统 / 什么是 Pipeline](concepts/material/what-is-pipeline.md)：先理解 pipeline 是怎样成为一套可复用渲染结构的。
 - [概念 / 引擎循环](concepts/engine-loop.md)：面向使用者理解 `EngineLoop` 的职责边界和接入方式。
 - [设计 / 架构总览](architecture.md)：三层结构、资源生命周期、场景启动与每帧工作流。
 - [设计 / 术语概念](glossary.md)：项目自造词与关键对象的一句话定义。

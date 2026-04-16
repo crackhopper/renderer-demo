@@ -10,7 +10,8 @@
 #include "core/scene/scene.hpp"
 #include "core/utils/env.hpp"
 #include "core/utils/filesystem_tools.hpp"
-#include "infra/material_loader/blinn_phong_material_loader.hpp"
+#include "infra/material_loader/generic_material_loader.hpp"
+#include "core/utils/filesystem_tools.hpp"
 #include "infra/window/window.hpp"
 
 #include "scene_test_helpers.hpp"
@@ -49,7 +50,7 @@ int main() {
     });
     auto indexBufferPtr = LX_core::IndexBuffer::create({0u, 1u, 2u});
     auto meshPtr = LX_core::Mesh::create(vertexBufferPtr, indexBufferPtr);
-    auto material = LX_infra::loadBlinnPhongMaterial();
+    auto material = LX_infra::loadGenericMaterial("materials/blinnphong_default.material");
     auto renderable = std::make_shared<LX_core::RenderableSubMesh>(
         meshPtr, material, LX_core::Skeleton::create({}));
     auto scene = LX_core::Scene::create(renderable);

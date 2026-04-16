@@ -1,5 +1,8 @@
 # REQ-030: 材质 binding 查找改为按 Pass 作用域解析
 
+> 状态说明：本 REQ 的核心要求已被 [`REQ-032`](032-pass-aware-material-binding-interface.md) 吸收。
+> 后续实施请以 `REQ-032` 为主；本文件保留为问题定义、设计背景与迁移约束。
+
 ## 背景
 
 当前代码同时存在两套 binding cache：
@@ -50,6 +53,12 @@
   - 允许存在，但要求所有查询都带 pass
 - 不允许继续使用“最后写入覆盖前者”的静默行为作为正式合同。
 
+`REQ-032` 选择的正式方向是：
+
+- 保留同名 binding 跨 pass 共存
+- 与 pass 强相关的查询和 descriptor 收集必须显式带 pass
+- 不再允许 template-global flattened cache 成为材质 binding 解析的权威入口
+
 ### R5: 文档与 spec 需要同步校正
 
 - `notes/concepts/material/` 必须说明 pass 级 binding 才是多 pass 模型的完整表达。
@@ -71,6 +80,12 @@
 - [`REQ-025`](025-custom-material-template-and-loader.md)
 - [`REQ-022`](022-material-pass-selection.md)
 
+## 与后续 REQ 的关系
+
+- [`REQ-031`](031-global-shader-binding-contract.md) 定义 binding ownership 的规则来源。
+- [`REQ-032`](032-pass-aware-material-binding-interface.md) 吸收本 REQ 的实现合同，并把它扩展为完整的 pass-aware 材质接口。
+- [`REQ-033`](033-generic-material-asset-and-defaults.md) 在 `REQ-032` 之上定义通用 material asset / defaults / loader 合同。
+
 ## 实施状态
 
-未开始。
+已并入 `REQ-032`，不单独实施。

@@ -61,7 +61,8 @@ public:
 
   virtual IRenderResourcePtr getVertexBuffer() const = 0;
   virtual IRenderResourcePtr getIndexBuffer() const = 0;
-  virtual std::vector<IRenderResourcePtr> getDescriptorResources() const = 0;
+  virtual std::vector<IRenderResourcePtr>
+  getDescriptorResources(StringID pass) const = 0;
   virtual IShaderPtr getShaderInfo() const = 0;
   virtual PerDrawDataPtr getPerDrawData() const { return nullptr; }
   virtual StringID getRenderSignature(StringID pass) const = 0;
@@ -108,7 +109,8 @@ public:
 
   IRenderResourcePtr getVertexBuffer() const override;
   IRenderResourcePtr getIndexBuffer() const override;
-  std::vector<IRenderResourcePtr> getDescriptorResources() const override;
+  std::vector<IRenderResourcePtr>
+  getDescriptorResources(StringID pass) const override;
   IShaderPtr getShaderInfo() const override;
   PerDrawDataPtr getPerDrawData() const override { return m_perDrawData; }
   StringID getRenderSignature(StringID pass) const override;
@@ -153,7 +155,8 @@ public:
 
   IRenderResourcePtr getVertexBuffer() const override;
   IRenderResourcePtr getIndexBuffer() const override;
-  std::vector<IRenderResourcePtr> getDescriptorResources() const override;
+  std::vector<IRenderResourcePtr>
+  getDescriptorResources(StringID pass) const override;
   IShaderPtr getShaderInfo() const override;
   PerDrawDataPtr getPerDrawData() const override { return perDrawData; }
   StringID getRenderSignature(StringID pass) const override;

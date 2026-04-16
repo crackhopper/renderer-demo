@@ -73,7 +73,7 @@ makeRenderable(const std::string &shaderName = "fake_fg",
   auto mesh = Mesh::create(vb, ib);
 
   auto shader = std::make_shared<FakeShader>();
-  auto tmpl = MaterialTemplate::create(shaderName, shader);
+  auto tmpl = MaterialTemplate::create(shaderName);
 
   ShaderProgramSet ps;
   ps.shaderName = shaderName;

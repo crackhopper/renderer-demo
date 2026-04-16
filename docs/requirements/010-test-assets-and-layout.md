@@ -151,4 +151,8 @@ bool cdToWhereAssetsExist(const std::string &subpath);
 
 ## 实施状态
 
-未开始。
+2026-04-16 核查结果：未开始。
+
+- 仓库仍使用根目录 `models/` 与 `textures/`
+- 尚无 `assets/` 顶层目录
+- 尚无 `cdToWhereAssetsExist()` helper

@@ -208,7 +208,7 @@ void main() {
 
 ## 4. 当前版本需要特别注意的两点
 
-- `MaterialUBO` 这个块名仍然必须叫 `MaterialUBO`，因为 `MaterialInstance` 是靠反射查这个名字来定位 CPU 侧字节缓冲区的
+- `MaterialUBO` 现在只是一个普通的 material-owned buffer binding 名，不再是唯一合法名字；真正不能随便改的是系统保留名 `CameraUBO` / `LightUBO` / `Bones`
 - 当前 `pbr.frag` 已经不是“纯 UBO 驱动”，它默认还依赖 `albedoMap`，并可选依赖 `normalMap`、`metallicRoughnessMap`
 
 这意味着它和教程 01 章里的“最小 PBR 心智模型”之间有一层现实差异：
@@ -236,9 +236,9 @@ void main() {
 
 - `CameraUBO` — 见 `src/core/scene/camera.hpp`，`CameraData::getBindingName()` 返回 `"CameraUBO"`
 - `LightUBO` — 见 `src/core/scene/light.hpp:58`，`getBindingName()` 返回 `"LightUBO"`
-- `MaterialUBO` — 见 `src/core/asset/material_instance.hpp` / `src/core/asset/material_instance.cpp`
+- `MaterialUBO` — 当前 shader 恰好这样命名；如果改成别的非保留名字，`MaterialInstance` 仍能按反射识别它
 
-UBO 这一层名字不能变；纹理这一层名字也最好直接沿用 shader 里的 `albedoMap` / `normalMap` / `metallicRoughnessMap`，这样最省事。
+真正不能乱改的是系统保留名字；材质自有的 buffer / texture binding 只要和 shader 反射保持一致即可。纹理这一层名字仍然最好直接沿用 shader 里的 `albedoMap` / `normalMap` / `metallicRoughnessMap`，这样最省事。
 
 ---
 

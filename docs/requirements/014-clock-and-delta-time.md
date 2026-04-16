@@ -175,4 +175,16 @@ TEST(Clock, smoothed_delta_falls_back_to_delta_when_empty) {
 
 ## 实施状态
 
-未开始。
+2026-04-16 核查结果：**部分完成**。
+
+### 已完成
+
+- `src/core/time/clock.hpp` / `.cpp` 已存在
+- `tick()` / `deltaTime()` / `totalTime()` / `frameCount()` 已实现
+- `src/core/gpu/engine_loop.cpp` 已在 `tickFrame()` 中调用 `m_clock.tick()`
+
+### 尚未完成
+
+- `smoothedDeltaTime()` 尚未实现
+- 文档要求的 `test_clock` 尚未补齐
+- 原文里要求的手写 while-loop 接线已经过时，当前应以 `EngineLoop` 为正式接入点

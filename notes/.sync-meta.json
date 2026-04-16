@@ -1,17 +1,15 @@
 {
-  "lastSyncedCommit": "703dfc24599d5db478f040d7a69c5d096bc3598b",
-  "lastSyncedAt": "2026-04-15T09:20:00Z",
+  "lastSyncedCommit": "693e0887deff7d0f387a42161477be00087f8179",
+  "lastSyncedAt": "2026-04-16T06:15:18Z",
   "mode": "incremental",
   "files": [
-    "notes/subsystems/index.md",
-    "notes/subsystems/vulkan-backend.md",
-    "notes/vulkan-backend/index.md",
-    "notes/vulkan-backend/01-overview-and-lifecycle.md",
-    "notes/vulkan-backend/02-device-and-swapchain.md",
-    "notes/vulkan-backend/03-resource-sync.md",
-    "notes/vulkan-backend/04-pipeline-and-descriptors.md",
-    "notes/vulkan-backend/05-command-recording-and-draw.md",
+    "notes/concepts/material/index.md",
+    "notes/concepts/material/material-instance.md",
+    "notes/concepts/material/shader.md",
+    "notes/concepts/material/template-blueprint.md",
+    "notes/subsystems/material-system.md",
     "notes/subsystems/scene.md",
-    "notes/场景对象详解.md"
+    "notes/tutorial/02-pbr-shader.md",
+    "notes/tutorial/03-material-loader.md"
   ]
 }

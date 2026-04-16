@@ -58,4 +58,8 @@
 
 ## 实施状态
 
-未开始。
+2026-04-16 核查结果：未开始。
+
+- `Camera` 尚无 culling mask
+- renderable 尚无 layer mask
+- queue 构建阶段也还没有 layer 过滤

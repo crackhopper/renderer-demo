@@ -20,6 +20,7 @@ nav:
           - concepts/material/index.md
           - 材质模板：一张蓝图如何描述多个 Pass: concepts/material/template-blueprint.md
           - Shader 在材质系统里扮演什么角色: concepts/material/shader.md
+          - 什么是 Pipeline: concepts/material/what-is-pipeline.md
           - 材质模板为什么会影响 Pipeline: concepts/material/template-and-pipeline.md
           - 材质实例如何承接运行时状态: concepts/material/material-instance.md
           - 怎样定义自己的材质模板: concepts/material/custom-template.md
@@ -27,8 +28,6 @@ nav:
           - concepts/camera/index.md
       - 光源系统:
           - concepts/light/index.md
-      - 渲染管线:
-          - concepts/pipeline/index.md
       - 引擎循环:
           - concepts/engine-loop.md
   - 设计:

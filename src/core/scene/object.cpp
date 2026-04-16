@@ -1,5 +1,6 @@
 #include "object.hpp"
 #include "scene.hpp"
+#include "core/asset/shader_binding_ownership.hpp"
 
 #include <algorithm>
 #include <iostream>
@@ -74,13 +75,15 @@ const VertexLayoutItem *findLayoutItem(const VertexLayout &layout,
 }
 
 bool requiresRenderableOwnedResource(const ShaderResourceBinding &binding) {
-  if (binding.name == "CameraUBO" || binding.name == "LightUBO")
-    return false;
-  if (binding.name == "MaterialUBO")
-    return true;
-  if (binding.name == "Bones")
-    return true;
-  return false;
+  if (isSystemOwnedBinding(binding.name)) {
+    // Bones is system-owned (not material-owned) but still provided by the
+    // renderable's skeleton, so it counts as renderable-owned.
+    return binding.name == "Bones";
+  }
+  // Buffer descriptors are structural requirements. Sampled resources may be
+  // intentionally left unset and gated by shader parameters.
+  return binding.type == ShaderPropertyType::UniformBuffer ||
+         binding.type == ShaderPropertyType::StorageBuffer;
 }
 
 ValidatedRenderablePassData
@@ -92,7 +95,7 @@ buildLegacyValidatedData(const RenderableSubMesh &sub, StringID pass) {
   data.drawData = sub.perDrawData;
   data.vertexBuffer = sub.getVertexBuffer();
   data.indexBuffer = sub.getIndexBuffer();
-  data.descriptorResources = sub.getDescriptorResources();
+  data.descriptorResources = sub.getDescriptorResources(pass);
   data.objectSignature = sub.getRenderSignature(pass);
   if (sub.material) {
     data.pipelineKey = PipelineKey::build(data.objectSignature,
@@ -148,8 +151,9 @@ IRenderResourcePtr SceneNode::getIndexBuffer() const {
                 : nullptr;
 }
 
-std::vector<IRenderResourcePtr> SceneNode::getDescriptorResources() const {
-  auto data = getValidatedPassData(Pass_Forward);
+std::vector<IRenderResourcePtr>
+SceneNode::getDescriptorResources(StringID pass) const {
+  auto data = getValidatedPassData(pass);
   if (data)
     return data->get().descriptorResources;
   return {};
@@ -159,7 +163,8 @@ IShaderPtr SceneNode::getShaderInfo() const {
   auto data = getValidatedPassData(Pass_Forward);
   if (data)
     return data->get().shaderInfo;
-  return m_materialInstance ? m_materialInstance->getShaderInfo() : nullptr;
+  return m_materialInstance ? m_materialInstance->getShaderInfo(Pass_Forward)
+                            : nullptr;
 }
 
 StringID SceneNode::getRenderSignature(StringID pass) const {
@@ -245,22 +250,23 @@ void SceneNode::rebuildValidatedCache() {
       }
     }
 
-    auto descriptorResources = m_materialInstance->getDescriptorResources();
-    bool hasMaterialUbo = false;
-    for (const auto &res : descriptorResources) {
-      if (res && res->getBindingName() == StringID("MaterialUBO")) {
-        hasMaterialUbo = true;
-        break;
-      }
-    }
+    auto descriptorResources = m_materialInstance->getDescriptorResources(pass);
 
+    // Validate reserved-name type contract and renderable-owned resources.
     for (const auto &binding : shader->getReflectionBindings()) {
+      // REQ-031 R3: reserved-name type misuse is a fatal authoring error.
+      auto expectedType = getExpectedTypeForSystemBinding(binding.name);
+      if (expectedType && binding.type != *expectedType) {
+        fatalValidation(
+            *this, pass, *m_materialInstance, entry.shaderSet,
+            "reserved binding '" + binding.name +
+                "' has wrong descriptor type (shader authoring error)",
+            &layout);
+      }
+
       if (!requiresRenderableOwnedResource(binding))
         continue;
-      if (binding.name == "MaterialUBO" && !hasMaterialUbo) {
-        fatalValidation(*this, pass, *m_materialInstance, entry.shaderSet,
-                        "missing MaterialUBO resource", &layout);
-      }
+
       if (binding.name == "Bones") {
         if (!m_skeleton.has_value() || !m_skeleton.value()) {
           fatalValidation(*this, pass, *m_materialInstance, entry.shaderSet,
@@ -268,6 +274,23 @@ void SceneNode::rebuildValidatedCache() {
         }
         descriptorResources.push_back(std::static_pointer_cast<IRenderResource>(
             m_skeleton.value()->getUBO()));
+        continue;
+      }
+
+      // Non-system-owned binding: verify material provides a matching resource.
+      const StringID bindingId(binding.name);
+      bool found = false;
+      for (const auto &res : descriptorResources) {
+        if (res && res->getBindingName() == bindingId) {
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        fatalValidation(*this, pass, *m_materialInstance, entry.shaderSet,
+                        "missing material-owned resource '" + binding.name +
+                            "'",
+                        &layout);
       }
     }
 
@@ -330,11 +353,12 @@ IRenderResourcePtr RenderableSubMesh::getIndexBuffer() const {
               : nullptr;
 }
 
-std::vector<IRenderResourcePtr> RenderableSubMesh::getDescriptorResources() const {
+std::vector<IRenderResourcePtr>
+RenderableSubMesh::getDescriptorResources(StringID pass) const {
   std::vector<IRenderResourcePtr> ret;
   if (!material)
     return ret;
-  auto res = material->getDescriptorResources();
+  auto res = material->getDescriptorResources(pass);
   ret.insert(ret.end(), res.begin(), res.end());
   if (skeleton.has_value()) {
     ret.push_back(
@@ -344,7 +368,7 @@ std::vector<IRenderResourcePtr> RenderableSubMesh::getDescriptorResources() cons
 }
 
 IShaderPtr RenderableSubMesh::getShaderInfo() const {
-  return material ? material->getShaderInfo() : nullptr;
+  return material ? material->getShaderInfo(Pass_Forward) : nullptr;
 }
 
 StringID RenderableSubMesh::getRenderSignature(StringID pass) const {

@@ -12,7 +12,8 @@
 
 #include "scene_test_helpers.hpp"
 #include "core/utils/filesystem_tools.hpp"
-#include "infra/material_loader/blinn_phong_material_loader.hpp"
+#include "infra/material_loader/generic_material_loader.hpp"
+#include "core/utils/filesystem_tools.hpp"
 #include "infra/window/window.hpp"
 
 #include <vulkan/vulkan.h>
@@ -80,7 +81,7 @@ int main() {
     auto indexBufferPtr = LX_core::IndexBuffer::create({0u, 1u, 2u});
     auto meshPtr = LX_core::Mesh::create(vertexBufferPtr, indexBufferPtr);
 
-    auto material = LX_infra::loadBlinnPhongMaterial();
+    auto material = LX_infra::loadGenericMaterial("materials/blinnphong_default.material");
     material->setInt(LX_core::StringID("enableNormal"),
                      0); // avoid normal texture
     material->syncGpuData();

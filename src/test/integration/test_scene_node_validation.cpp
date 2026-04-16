@@ -6,10 +6,12 @@
 #include "core/rhi/vertex_buffer.hpp"
 #include "core/scene/object.hpp"
 #include "core/scene/scene.hpp"
-#include "infra/material_loader/blinn_phong_material_loader.hpp"
+#include "core/utils/filesystem_tools.hpp"
+#include "infra/material_loader/generic_material_loader.hpp"
 
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -190,14 +192,64 @@ SkeletonPtr makeSkeleton() {
   return Skeleton::create(bones);
 }
 
+std::filesystem::path findProjectMaterialsDir() {
+  auto p = std::filesystem::current_path();
+  for (int i = 0; i < 5; ++i) {
+    if (std::filesystem::exists(p / "materials"))
+      return p / "materials";
+    auto parent = p.parent_path();
+    if (parent == p)
+      break;
+    p = parent;
+  }
+  return std::filesystem::current_path() / "materials";
+}
+
+MaterialInstancePtr makeMaterialFromYaml(const std::string &yamlContent) {
+  auto tmpPath = findProjectMaterialsDir() / "test_node_val.material";
+  {
+    std::ofstream out(tmpPath);
+    out << yamlContent;
+  }
+  auto mat = loadGenericMaterial(tmpPath);
+  std::filesystem::remove(tmpPath);
+  return mat;
+}
+
 MaterialInstancePtr makeMaterial(bool skinning) {
-  return loadBlinnPhongMaterial({ShaderVariant{"USE_LIGHTING", true},
-                                 ShaderVariant{"USE_SKINNING", skinning}});
+  std::string yaml =
+      "shader: blinnphong_0\n"
+      "variants:\n"
+      "  USE_LIGHTING: true\n"
+      "  USE_SKINNING: " + std::string(skinning ? "true" : "false") + "\n"
+      "variantRules:\n"
+      "  - requires: [USE_SKINNING]\n"
+      "    depends: [USE_LIGHTING]\n"
+      "passes:\n"
+      "  Forward:\n"
+      "    renderState:\n"
+      "      depthTest: true\n";
+  return makeMaterialFromYaml(yaml);
 }
 
 MaterialInstancePtr
 makeMaterial(std::vector<ShaderVariant> variants) {
-  return loadBlinnPhongMaterial(std::move(variants));
+  std::string yaml =
+      "shader: blinnphong_0\n"
+      "variants:\n";
+  for (const auto &v : variants)
+    yaml += "  " + v.macroName + ": " + (v.enabled ? "true" : "false") + "\n";
+  yaml +=
+      "variantRules:\n"
+      "  - requires: [USE_NORMAL_MAP]\n"
+      "    depends: [USE_LIGHTING, USE_UV]\n"
+      "  - requires: [USE_SKINNING]\n"
+      "    depends: [USE_LIGHTING]\n"
+      "passes:\n"
+      "  Forward:\n"
+      "    renderState:\n"
+      "      depthTest: true\n";
+  return makeMaterialFromYaml(yaml);
 }
 
 bool hasBinding(const std::vector<IRenderResourcePtr> &resources,
@@ -321,6 +373,25 @@ void testOrdinaryMaterialWritesDoNotChangeValidatedPassState() {
          "nodeB stays supported after ordinary material write");
   EXPECT(afterA.has_value(), "nodeA validated data survives ordinary write");
   EXPECT(afterB.has_value(), "nodeB validated data survives ordinary write");
+}
+
+void testOptionalSampledResourcesDoNotBlockValidation() {
+  auto material = makeMaterial({ShaderVariant{"USE_UV", true},
+                                ShaderVariant{"USE_LIGHTING", false}});
+  auto node = SceneNode::create("node_optional_textures", makeMeshWithUvOnly(),
+                                material, nullptr);
+
+  EXPECT(node->supportsPass(Pass_Forward),
+         "optional sampled resources should not be required structurally");
+  auto validated = node->getValidatedPassData(Pass_Forward);
+  EXPECT(validated.has_value(),
+         "validated pass data should exist without bound optional textures");
+  if (validated) {
+    EXPECT(hasBinding(validated->get().descriptorResources, "MaterialUBO"),
+           "material buffer should still be bound");
+    EXPECT(!hasBinding(validated->get().descriptorResources, "albedoMap"),
+           "missing optional texture should be skipped");
+  }
 }
 
 void testSkinningVariantChangesPipelineKeyAndAddsBones() {
@@ -457,6 +528,7 @@ void testFatalSubprocesses(const std::filesystem::path &self) {
 
 int main(int argc, char **argv) {
   if (argc > 1) {
+    cdToWhereShadersExist("blinnphong_0");
     const std::string mode = argv[1];
     if (mode == "--duplicate")
       return duplicateMode();
@@ -474,11 +546,17 @@ int main(int argc, char **argv) {
       return invalidSkinningSkeletonMode();
   }
 
+  if (!cdToWhereShadersExist("blinnphong_0")) {
+    std::cerr << "SKIP: failed to locate shader assets\n";
+    return 0;
+  }
+
   testIndependentSceneNodeValidation();
   testPassEnableStateRebuildsCache();
   testSharedMaterialPassChangesRevalidateAllSceneNodes();
   testSceneDestructionDetachesSceneNodesFromMaterialListener();
   testOrdinaryMaterialWritesDoNotChangeValidatedPassState();
+  testOptionalSampledResourcesDoNotBlockValidation();
   testSkinningVariantChangesPipelineKeyAndAddsBones();
   testRenderQueueConsumesValidatedSceneNode();
   testSceneAssignsStableDebugId();

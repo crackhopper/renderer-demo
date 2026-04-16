@@ -11,7 +11,8 @@
 
 // 窗口系统
 #include "infra/window/window.hpp"
-#include "infra/material_loader/blinn_phong_material_loader.hpp"
+#include "infra/material_loader/generic_material_loader.hpp"
+#include "core/utils/filesystem_tools.hpp"
 
 #include <array>
 #include <cstdlib>
@@ -62,7 +63,7 @@ int main() {
   auto indexBufferPtr = IndexBuffer::create({0, 1, 2});
   auto meshPtr = Mesh::create(vertexBufferPtr, indexBufferPtr);
 
-  auto material = LX_infra::loadBlinnPhongMaterial();
+  auto material = LX_infra::loadGenericMaterial("materials/blinnphong_default.material");
   material->setInt(LX_core::StringID("enableNormal"), 0);
   material->syncGpuData();
 

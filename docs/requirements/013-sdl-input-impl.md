@@ -246,4 +246,7 @@ TEST(Sdl3InputState, mouse_delta_resets_on_next_frame) {
 
 ## 实施状态
 
-未开始。
+2026-04-16 核查结果：未开始。
+
+- SDL 窗口实现仍只消费 `SDL_EVENT_QUIT`
+- 尚无 `Sdl3InputState`
