@@ -61,8 +61,6 @@ public:
     return std::nullopt;
   }
   size_t getProgramHash() const override { return 0; }
-  const void *getRawData() const override { return nullptr; }
-  u32 getByteSize() const override { return 0; }
 
 private:
   std::vector<ShaderStageCode> m_stages;
@@ -90,8 +88,7 @@ int runSelf(const std::filesystem::path &self, const char *mode) {
   return std::system(cmd.c_str());
 }
 
-MaterialInstancePtr
-buildInstanceFromBlinnPhong(ResourcePassFlag flag = ResourcePassFlag::Forward) {
+MaterialInstancePtr buildInstanceFromBlinnPhong() {
   auto dir = findShaderDir();
   if (dir.empty()) {
     std::cerr << "  SETUP: blinnphong_0 shaders not found; skipping test\n";
@@ -120,7 +117,7 @@ buildInstanceFromBlinnPhong(ResourcePassFlag flag = ResourcePassFlag::Forward) {
   tmpl->setPass(Pass_Forward, std::move(entry));
   tmpl->buildBindingCache();
 
-  return MaterialInstance::create(tmpl, flag);
+  return MaterialInstance::create(tmpl);
 }
 
 MaterialTemplate::Ptr buildMultiPassTemplate(const RenderState &forwardState,
@@ -165,9 +162,9 @@ void test_ubo_buffer_sized_from_reflection() {
   auto mat = buildInstanceFromBlinnPhong();
   if (!mat)
     return;
-  const auto &buf = mat->getUboBuffer();
+  const auto &buf = mat->getParameterBuffer();
   REQUIRE(!buf.empty());
-  REQUIRE(mat->getUboBinding() != nullptr);
+  REQUIRE(mat->getParameterBinding() != nullptr);
   // blinnphong_0 MaterialUBO: vec3(12) + float(4) + float(4) + 3*int(12) = 32
   REQUIRE(buf.size() == 32);
   std::cout << "  buffer size = " << buf.size() << "\n";
@@ -180,7 +177,7 @@ void test_setVec3_writes_12_bytes_only() {
     return;
   // Seed shininess first so we can verify setVec3 does not clobber it.
   mat->setFloat(StringID("shininess"), 99.0f);
-  const auto &buf = mat->getUboBuffer();
+  const auto &buf = mat->getParameterBuffer();
   float shiny = 0.0f;
   std::memcpy(&shiny, buf.data() + 12, sizeof(float));
   REQUIRE(shiny == 99.0f);
@@ -210,7 +207,7 @@ void test_setFloat_and_setInt_at_reflected_offsets() {
   mat->setInt(StringID("enableAlbedo"), 1);
   mat->setInt(StringID("enableNormal"), 0);
 
-  const auto &buf = mat->getUboBuffer();
+  const auto &buf = mat->getParameterBuffer();
   float spec = 0.0f;
   int32_t ea = -1, en = -1;
   std::memcpy(&spec, buf.data() + 16, sizeof(float));
@@ -273,11 +270,11 @@ void test_loader_produces_valid_instance() {
   }
   std::filesystem::current_path(prev);
   REQUIRE(mat != nullptr);
-  REQUIRE(!mat->getUboBuffer().empty());
+  REQUIRE(!mat->getParameterBuffer().empty());
   REQUIRE(mat->getShaderInfo() != nullptr);
 
   // Seeded defaults: baseColor == {0.8, 0.8, 0.8}
-  const auto &buf = mat->getUboBuffer();
+  const auto &buf = mat->getParameterBuffer();
   float r = 0, g = 0, b = 0;
   std::memcpy(&r, buf.data() + 0, sizeof(float));
   std::memcpy(&g, buf.data() + 4, sizeof(float));
@@ -297,9 +294,9 @@ void test_ubo_layout_comes_from_enabled_pass_shader() {
   RenderState forwardState;
   RenderState shadowState;
   auto tmpl = buildMultiPassTemplate(forwardState, shadowState);
-  auto mat = MaterialInstance::create(tmpl, ResourcePassFlag::Forward);
-  REQUIRE(mat->getUboBinding() != nullptr);
-  REQUIRE(mat->getUboBuffer().size() == 32);
+  auto mat = MaterialInstance::create(tmpl);
+  REQUIRE(mat->getParameterBinding() != nullptr);
+  REQUIRE(mat->getParameterBuffer().size() == 32);
   std::cout << "  shared UBO layout accepted across all defined passes\n";
 }
 
@@ -308,30 +305,31 @@ void test_instances_default_enable_all_template_passes() {
   RenderState forwardState;
   RenderState shadowState;
   auto tmpl = buildMultiPassTemplate(forwardState, shadowState);
-  auto mat = MaterialInstance::create(tmpl, ResourcePassFlag::Forward);
+  auto mat = MaterialInstance::create(tmpl);
 
   REQUIRE(mat->isPassEnabled(Pass_Forward));
   REQUIRE(mat->isPassEnabled(Pass_Shadow));
   REQUIRE(mat->getEnabledPasses().size() == 2);
-  REQUIRE(mat->getPassFlag() ==
-          (ResourcePassFlag::Forward | ResourcePassFlag::Shadow));
   std::cout << "  new instances start with every template-defined pass enabled\n";
 }
 
-void test_getPassFlag_is_derived_from_enabled_passes() {
-  std::cout << "\n-- test_getPassFlag_is_derived_from_enabled_passes --\n";
+void test_enabled_passes_follow_mutations() {
+  std::cout << "\n-- test_enabled_passes_follow_mutations --\n";
   RenderState forwardState;
   RenderState shadowState;
   auto tmpl = buildMultiPassTemplate(forwardState, shadowState);
-  auto mat = MaterialInstance::create(tmpl, ResourcePassFlag::Forward);
+  auto mat = MaterialInstance::create(tmpl);
 
   mat->setPassEnabled(Pass_Shadow, false);
-  REQUIRE(mat->getPassFlag() == ResourcePassFlag::Forward);
+  REQUIRE(mat->isPassEnabled(Pass_Forward));
+  REQUIRE(!mat->isPassEnabled(Pass_Shadow));
   mat->setPassEnabled(Pass_Forward, false);
-  REQUIRE(static_cast<uint32_t>(mat->getPassFlag()) == 0);
+  REQUIRE(!mat->isPassEnabled(Pass_Forward));
+  REQUIRE(mat->getEnabledPasses().empty());
   mat->setPassEnabled(Pass_Shadow, true);
-  REQUIRE(mat->getPassFlag() == ResourcePassFlag::Shadow);
-  std::cout << "  pass flag follows the enabled subset only\n";
+  REQUIRE(!mat->isPassEnabled(Pass_Forward));
+  REQUIRE(mat->isPassEnabled(Pass_Shadow));
+  std::cout << "  enabled pass set follows the toggled subset only\n";
 }
 
 void test_render_state_is_pass_aware() {
@@ -342,7 +340,7 @@ void test_render_state_is_pass_aware() {
   shadowState.depthWriteEnable = false;
   shadowState.blendEnable = true;
   auto tmpl = buildMultiPassTemplate(forwardState, shadowState);
-  auto mat = MaterialInstance::create(tmpl, ResourcePassFlag::Forward);
+  auto mat = MaterialInstance::create(tmpl);
 
   REQUIRE(mat->getRenderState(Pass_Forward) == forwardState);
   REQUIRE(mat->getRenderState(Pass_Shadow) == shadowState);
@@ -361,7 +359,7 @@ void test_non_structural_writes_do_not_notify_pass_listeners() {
 
   mat->setFloat(StringID("shininess"), 7.0f);
   mat->setInt(StringID("enableAlbedo"), 1);
-  mat->updateUBO();
+  mat->syncGpuData();
   REQUIRE(notifications == 0);
 
   mat->setPassEnabled(Pass_Forward, false);
@@ -374,7 +372,7 @@ int undefinedPassMode() {
   RenderState forwardState;
   RenderState shadowState;
   auto tmpl = buildMultiPassTemplate(forwardState, shadowState);
-  auto mat = MaterialInstance::create(tmpl, ResourcePassFlag::Forward);
+  auto mat = MaterialInstance::create(tmpl);
   mat->setPassEnabled(Pass_Deferred, false);
   return 0;
 }
@@ -401,7 +399,7 @@ int main(int argc, char **argv) {
   test_loader_produces_valid_instance();
   test_ubo_layout_comes_from_enabled_pass_shader();
   test_instances_default_enable_all_template_passes();
-  test_getPassFlag_is_derived_from_enabled_passes();
+  test_enabled_passes_follow_mutations();
   test_render_state_is_pass_aware();
   test_non_structural_writes_do_not_notify_pass_listeners();
   test_setPassEnabled_fatals_on_undefined_pass(argv[0]);

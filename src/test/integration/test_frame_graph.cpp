@@ -58,9 +58,6 @@ public:
   size_t getProgramHash() const override { return 0; }
   std::string getShaderName() const override { return "fake_fg"; }
 
-  const void *getRawData() const override { return nullptr; }
-  u32 getByteSize() const override { return 0; }
-
 private:
   std::vector<ShaderStageCode> m_stages;
   std::vector<ShaderResourceBinding> m_bindings;
@@ -69,7 +66,7 @@ private:
 std::shared_ptr<RenderableSubMesh>
 makeRenderable(const std::string &shaderName = "fake_fg",
                const std::vector<ShaderVariant> &variants = {},
-               ResourcePassFlag passFlag = ResourcePassFlag::Forward) {
+               bool enableShadow = false) {
   auto vb = VertexBuffer<VertexPos>::create(
       std::vector<VertexPos>{{{0, 0, 0}}, {{1, 0, 0}}, {{0, 1, 0}}});
   auto ib = IndexBuffer::create({0, 1, 2});
@@ -91,8 +88,7 @@ makeRenderable(const std::string &shaderName = "fake_fg",
   tmpl->setPass(Pass_Shadow, std::move(shadowEntry));
 
   auto material = MaterialInstance::create(tmpl);
-  if ((static_cast<u32>(passFlag) & static_cast<u32>(ResourcePassFlag::Shadow)) ==
-      0u) {
+  if (!enableShadow) {
     material->setPassEnabled(Pass_Shadow, false);
   }
   return std::make_shared<RenderableSubMesh>(mesh, material, nullptr);
@@ -100,18 +96,19 @@ makeRenderable(const std::string &shaderName = "fake_fg",
 
 // Helpers for REQ-009 scenarios.
 CameraPtr makeCameraWithTarget(const RenderTarget &target) {
-  auto cam = std::make_shared<Camera>(ResourcePassFlag::Forward);
+  auto cam = std::make_shared<Camera>();
   cam->setTarget(target);
   return cam;
 }
 
 CameraPtr makeCameraNoTarget() {
-  return std::make_shared<Camera>(ResourcePassFlag::Forward);
+  return std::make_shared<Camera>();
 }
 
-std::shared_ptr<DirectionalLight> makeLightWithMask(ResourcePassFlag mask) {
-  auto light = std::make_shared<DirectionalLight>(ResourcePassFlag::Forward);
-  light->setPassMask(mask);
+std::shared_ptr<DirectionalLight>
+makeLightWithPasses(std::initializer_list<StringID> passes) {
+  auto light = std::make_shared<DirectionalLight>();
+  light->setSupportedPasses(passes);
   return light;
 }
 
@@ -183,11 +180,10 @@ void testBuildFromSceneIsIdempotent() {
          "buildFromScene clears previous items on re-entry");
 }
 
-void testPassMaskFilterExcludesNonMatching() {
+void testPassFilterExcludesNonMatching() {
   // Renderable A participates in Forward + Shadow; B only in Forward.
-  auto rA = makeRenderable("fake_fg_a", {},
-                           ResourcePassFlag::Forward | ResourcePassFlag::Shadow);
-  auto rB = makeRenderable("fake_fg_b", {}, ResourcePassFlag::Forward);
+  auto rA = makeRenderable("fake_fg_a", {}, true);
+  auto rB = makeRenderable("fake_fg_b");
   auto scene = Scene::create(rA);
   scene->addRenderable(rB);
 
@@ -201,27 +197,13 @@ void testPassMaskFilterExcludesNonMatching() {
   EXPECT(passes[0].queue.getItems().size() == 2,
          "Forward pass: both renderables match");
   EXPECT(passes[1].queue.getItems().size() == 1,
-         "Shadow pass: only rA (which has Shadow bit)");
-}
-
-void testPassFlagFromStringIDSmoke() {
-  // Smoke test: the helper wired up in REQ-008 R1 returns the right flag.
-  EXPECT(passFlagFromStringID(Pass_Forward) == ResourcePassFlag::Forward,
-         "Pass_Forward → Forward");
-  EXPECT(passFlagFromStringID(Pass_Shadow) == ResourcePassFlag::Shadow,
-         "Pass_Shadow → Shadow");
-  EXPECT(passFlagFromStringID(Pass_Deferred) == ResourcePassFlag::Deferred,
-         "Pass_Deferred → Deferred");
-  // Unknown IDs return zero flag.
-  EXPECT(static_cast<u32>(passFlagFromStringID(
-             GlobalStringTable::get().Intern("UnknownPass"))) == 0u,
-         "unknown pass → 0");
+         "Shadow pass: only rA supports shadow");
 }
 
 void testMultiCameraTargetFilter() {
   // REQ-009: camera filtered by target in getSceneLevelResources.
   // Scene::Scene auto-adds a default camera at RenderTarget{} (sampleCount=1)
-  // and a default DirectionalLight with passMask = Forward|Deferred. We pick
+  // and a default DirectionalLight with Forward/Deferred support. We pick
   // targetA/B with distinct sampleCount so the auto camera does NOT match.
   const RenderTarget targetA{ImageFormat::BGRA8, ImageFormat::D32Float, 2};
   const RenderTarget targetB{ImageFormat::BGRA8, ImageFormat::D32Float, 4};
@@ -234,7 +216,7 @@ void testMultiCameraTargetFilter() {
   scene->addCamera(camB);
 
   // For targetA: camA matches, camB doesn't, default camera doesn't (sc=1≠2).
-  // Default DirectionalLight matches Pass_Forward (mask = Forward|Deferred).
+  // Default DirectionalLight matches Pass_Forward.
   auto resA = scene->getSceneLevelResources(Pass_Forward, targetA);
   EXPECT(resA.size() == 2,
          "Forward×targetA: camA UBO + default light UBO (2 entries)");
@@ -253,14 +235,13 @@ void testMultiCameraTargetFilter() {
   }
 }
 
-void testMultiLightPassMaskFilter() {
-  // REQ-009: light filtered by pass mask. Scene::Scene auto-adds one
-  // DirectionalLight (mask = Forward|Deferred) which counts toward both
+void testMultiLightPassFilter() {
+  // REQ-009: light filtered by supportsPass. Scene::Scene auto-adds one
+  // DirectionalLight (Forward + Deferred) which counts toward both
   // Forward and Deferred but not Shadow.
-  auto lightForward = makeLightWithMask(ResourcePassFlag::Forward);
-  auto lightShadow = makeLightWithMask(ResourcePassFlag::Shadow);
-  auto lightBoth = makeLightWithMask(ResourcePassFlag::Forward |
-                                     ResourcePassFlag::Shadow);
+  auto lightForward = makeLightWithPasses({Pass_Forward});
+  auto lightShadow = makeLightWithPasses({Pass_Shadow});
+  auto lightBoth = makeLightWithPasses({Pass_Forward, Pass_Shadow});
 
   auto scene = Scene::create(makeRenderable());
   scene->addLight(lightForward);
@@ -274,8 +255,8 @@ void testMultiLightPassMaskFilter() {
   EXPECT(resForward.size() == 4,
          "Pass_Forward: 1 cam + default light + lightForward + lightBoth = 4");
 
-  // Pass_Shadow: default camera matches, default light does NOT (mask lacks
-  // Shadow), lightShadow matches, lightBoth matches, lightForward does NOT.
+  // Pass_Shadow: default camera matches, default light does NOT support
+  // Shadow, lightShadow matches, lightBoth matches, lightForward does NOT.
   // Total = 1 cam + 2 lights = 3.
   auto resShadow = scene->getSceneLevelResources(Pass_Shadow, RenderTarget{});
   EXPECT(resShadow.size() == 3,
@@ -315,9 +296,8 @@ void testNullOptCameraBeforeAndAfterFill() {
 }
 
 void testMultiPassRebuildIsIdempotent() {
-  auto rA = makeRenderable("fake_fg_a", {},
-                           ResourcePassFlag::Forward | ResourcePassFlag::Shadow);
-  auto rB = makeRenderable("fake_fg_b", {}, ResourcePassFlag::Forward);
+  auto rA = makeRenderable("fake_fg_a", {}, true);
+  auto rB = makeRenderable("fake_fg_b");
   auto scene = Scene::create(rA);
   scene->addRenderable(rB);
 
@@ -361,11 +341,10 @@ int main() {
   testFramePassNameIsStringID();
   testBuildFromSceneIsIdempotent();
   testCollectAcrossMultiplePasses();
-  testPassFlagFromStringIDSmoke();
-  testPassMaskFilterExcludesNonMatching();
+  testPassFilterExcludesNonMatching();
   testMultiPassRebuildIsIdempotent();
   testMultiCameraTargetFilter();
-  testMultiLightPassMaskFilter();
+  testMultiLightPassFilter();
   testNullOptCameraBeforeAndAfterFill();
 
   if (failures > 0) {

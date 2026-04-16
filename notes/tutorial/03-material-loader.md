@@ -114,7 +114,7 @@ loadPbrMaterial(LX_core::ResourcePassFlag passFlag) {
     mat->setFloat(LX_core::StringID("metallicFactor"), 0.0f);
     mat->setFloat(LX_core::StringID("roughnessFactor"), 0.35f);
     mat->setFloat(LX_core::StringID("ao"), 1.0f);
-    mat->updateUBO();
+    mat->syncGpuData();
 
     return mat;
 }
@@ -136,7 +136,7 @@ loadPbrMaterial(LX_core::ResourcePassFlag passFlag) {
 | `buildBindingCache()` | 同上 | 把反射结果做成 `StringID -> ShaderResourceBinding` 查表 |
 | `MaterialInstance::create` | 同上 | 真正分配 std140 字节 buffer 的 owner |
 | `setVec3 / setFloat` | 同上 | 对照反射 member 偏移量，按类型校验写入 |
-| `updateUBO()` | 同上 | 标 `m_uboResource` dirty，下一帧 `syncResource` 推 GPU |
+| `syncGpuData()` | 同上 | 标 `m_uboResource` dirty，下一帧 `syncResource` 推 GPU |
 
 ### MaterialUBO 名字约定
 

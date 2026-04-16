@@ -46,7 +46,7 @@
 
 1. 为 pipeline 每个 descriptor set 分组、分配和写入 descriptor
 2. 绑定 vertex buffer / index buffer
-3. 如果 item 有 `objectInfo`，写 push constants
+3. 如果 item 有 `drawData`，写 push constants
 
 descriptor 写入时根据反射 binding 类型区分：
 

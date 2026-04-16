@@ -10,7 +10,6 @@
 #include "pipelines/graphics_shader_program.hpp"
 #include "render_objects/render_pass.hpp"
 #include "device_resources/buffer.hpp"
-#include "device_resources/shader.hpp"
 #include "device_resources/texture.hpp"
 #include "device.hpp"
 #include <stdexcept>
@@ -66,12 +65,6 @@ void VulkanResourceManager::syncResource(
   if (!cpuRes)
     return;
 
-  // Push constants are written directly into command buffers; no Vulkan object
-  // needed.
-  if (cpuRes->getType() == ResourceType::PushConstant) {
-    return;
-  }
-
   void *handle = cpuRes->getResourceHandle();
   m_activeHandles.insert(handle);
 
@@ -111,14 +104,6 @@ VulkanResourceManager::createGpuResource(const IRenderResourcePtr &cpuRes) {
         m_device, cpuRes->getByteSize(), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
             VK_MEMORY_PROPERTY_HOST_COHERENT_BIT));
-
-  case ResourceType::Shader:
-    // Pipelines load SPIR-V from disk (`VulkanShader`); `IShader` on the CPU
-    // side is for reflection / material binding, not standalone GPU upload
-    // here.
-    throw std::runtime_error(
-        "syncResource: ResourceType::Shader (IShader) has no GPU mirror in "
-        "VulkanResourceManager; use pipeline file paths");
 
   case ResourceType::CombinedImageSampler: {
     auto texCpu = std::dynamic_pointer_cast<CombinedTextureSampler>(cpuRes);
@@ -220,11 +205,6 @@ VulkanResourceManager::getBuffer(void *handle) {
 std::optional<std::reference_wrapper<VulkanTexture>>
 VulkanResourceManager::getTexture(void *handle) {
   GET_RESOURCE_IMPL(VulkanTexture, VulkanTexturePtr);
-}
-
-std::optional<std::reference_wrapper<VulkanShader>>
-VulkanResourceManager::getShader(void *handle) {
-  GET_RESOURCE_IMPL(VulkanShader, VulkanShaderPtr);
 }
 
 VulkanRenderPass &VulkanResourceManager::getRenderPass() {

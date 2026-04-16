@@ -15,16 +15,16 @@
 - `MaterialTemplate`：定义某个材质有哪些 pass、每个 pass 用什么 shader、variants 和 render state。
 - `MaterialInstance`：持有运行期参数，是当前唯一的材质类型。
 - `MaterialPassDefinition`：单个 pass 的 shader 配置和 render state。
-- `UboByteBufferResource`：把材质内部的 UBO byte buffer 暴露给 backend。
+- `MaterialParameterDataResource`：把材质内部的参数缓冲暴露给 backend。
 
 ## 典型数据流
 
 1. loader 为每个 pass 决定 shader variants，并编译得到对应 `CompiledShader`。
 2. `MaterialTemplate` 持有 pass entries，并把 pass shader 的反射结果并入 template 级 binding cache。
-3. `MaterialInstance` 构造时默认启用 template 中全部已定义 pass，并校验这些 pass 的 `MaterialUBO` 布局一致后再分配 byte buffer。
+3. `MaterialInstance` 构造时默认启用 template 中全部已定义 pass，并校验这些 pass 的 `MaterialUBO` 布局一致后再分配参数缓冲。
 4. 运行时通过 `setVec4` / `setVec3` / `setFloat` / `setInt` / `setTexture` 写参数。
 5. `setPassEnabled(pass, enabled)` 只改变 instance 的 enabled subset；对未定义 pass 调用会直接 `FATAL + terminate`。
-6. `updateUBO()` 把 dirty 状态传给 `m_uboResource`。
+6. `syncGpuData()` 把 dirty 状态传给 `m_uboResource`。
 
 ## 关键约束
 
@@ -33,7 +33,6 @@
 - `MaterialInstance` 会断言所有 template-defined passes 的 `MaterialUBO` 布局一致；不一致视为程序错误。
 - `setTexture` 绑定的是 `CombinedTextureSampler`，不是裸 texture。
 - `getDescriptorResources()` 的顺序固定：先 UBO，再按 `(set << 16 | binding)` 升序排好的纹理资源。
-- `getPassFlag()` 是派生视图，不再保存独立真值；它只反映“当前已定义且已启用”的 pass 集合，`UboByteBufferResource` 也会通过回调实时读取这组 flag。
 - `getRenderState(pass)` 必须按调用方给的 pass 返回对应 entry 的 render state；pipeline 构建不再偷读默认 Forward entry。
 - 当前 engine-wide draw push constant ABI 只有 `model`，lighting / skinning 不再通过 push constant 切接口。
 - `loadBlinnPhongMaterial()` 现在只接受固定 forward variant 集：`USE_VERTEX_COLOR`、`USE_UV`、`USE_LIGHTING`、`USE_NORMAL_MAP`、`USE_SKINNING`；非法组合会在 loader 内直接 `FATAL + terminate`。
@@ -41,12 +40,12 @@
 
 ## 当前实现边界
 
-- `MaterialTemplate` 仍保留 `MaterialPassDefinition::bindingCache` 这条旧路径，但运行时主路径主要依赖 template 级 `m_bindingCache`。
+- `MaterialPassDefinition::bindingCache` 仍然是每个 pass 自己的反射绑定缓存，不是废弃物；真正有问题的是 `MaterialTemplate::m_bindingCache` 现在把多 pass 绑定压平成一张表，导致材质侧按名字查 binding 时会丢失 pass 作用域。这个限制见 `REQ-030`。
 - 旧的 `MaterialInstance::create(template, passFlag)` 入参现在只保留兼容外形；当前实现不会用它裁剪初始 enabled pass 集，真正的 truth 是 template 定义 + 后续 `setPassEnabled(...)` 结果。
 - 若 enabled passes 没有任何 `MaterialUBO`，实例会回退到 template shader 查找布局。
 - `src/infra/material_loader/blinn_phong_material_loader.cpp` 里的 forward loader 会先规范化 variant 子集，再把同一组 enabled variants 同时写进 shader 编译输入和 `MaterialPassDefinition::shaderSet.variants`。
 - 这个 loader 只校验“variant 组合是否合法”，不会提前看 mesh/skeleton；资源层匹配交给 `SceneNode` 在结构校验阶段处理。
-- 共享 `MaterialInstance` 的 pass enable 改动属于结构性变化；`Scene` 会调用 `revalidateNodesUsing(materialInstance)` 传播到所有引用它的 `SceneNode`。普通 `setFloat` / `setTexture` / `updateUBO` 不会走这条传播链。
+- 共享 `MaterialInstance` 的 pass enable 改动属于结构性变化；`Scene` 会调用 `revalidateNodesUsing(materialInstance)` 传播到所有引用它的 `SceneNode`。普通 `setFloat` / `setTexture` / `syncGpuData` 不会走这条传播链。
 
 ## 从哪里改
 

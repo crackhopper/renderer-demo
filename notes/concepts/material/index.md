@@ -1,69 +1,66 @@
-# 材质系统
+# 材质系统总览
 
-这篇文档面向引擎使用者，解释材质模板、材质模板 Pass 定义、材质实例，以及它们如何和 shader、scene、pipeline 身份配合工作。
+材质系统在这个项目里不是一个单独类，而是一条从 shader、pass、render state 到运行时参数与纹理资源的完整链路。
 
-## 你会在什么场景接触它
+如果只保留一句话来理解它，那么就是：
 
-你在这个项目里接触材质，通常不是“手写一个材质类”，而是：
+> 我们先用 `MaterialTemplate` 定义“一个材质有哪些 pass、每个 pass 长什么样”，再用 `MaterialInstance` 承接运行时参数、纹理和 pass 开关，最后把这些结果交给 scene 与 pipeline 链路消费。
 
-- 用 loader 创建一个 `MaterialInstance`，例如 `loadBlinnPhongMaterial()`。
-- 自己组装 `MaterialTemplate` 和 `MaterialPassDefinition`，定义某个 pass 用什么 shader 和 render state。
-- 运行时继续改 UBO 参数、纹理或 pass enable 状态。
+## 先建立一个整体图景
 
-## 它负责什么
+当前项目里的材质系统主要由 4 个核心部件组成：
 
-当前材质系统拆成两层：
+- `MaterialTemplate`
+- `MaterialPassDefinition`
+- `MaterialInstance`
+- `ShaderProgramSet`
 
-- `MaterialTemplate`：定义有哪些 pass、每个 pass 用什么 `MaterialPassDefinition`。
-- `MaterialInstance`：保存运行时参数、descriptor 资源，以及哪些 pass 当前启用。
+它们各自分工不同：
 
-从使用者视角看，材质系统主要负责：
+- `MaterialTemplate` 负责蓝图
+- `MaterialPassDefinition` 负责单个 pass 的 shader / variants / render state
+- `MaterialInstance` 负责运行时参数、纹理和 pass enable 状态
+- `ShaderProgramSet` 负责把 shader 名、variants 和编译后的 shader 绑定到一起
 
-- 决定一个 renderable 能参加哪些 pass。
-- 提供 shader 需要的材质级 descriptor 资源，例如 `MaterialUBO`、纹理采样器。
-- 通过 `getRenderSignature(pass)` 参与 pipeline identity。
+## 这套系统为什么重要
 
-它不负责：
+几何只能告诉引擎“这个对象长什么样”，还不能回答“它应该怎样被渲染”。
 
-- mesh 顶点布局合法性，这属于 [场景对象](../scene/index.md) 的结构校验。
-- scene-level `CameraUBO` / `LightUBO` 的拥有权。
-- Vulkan pipeline 的最终构建和缓存，这属于 [渲染管线](../pipeline/index.md)。
+材质系统补上的就是这一层：
 
-## 当前实现状态
+- 用哪组 shader
+- 跑哪些 pass
+- 用什么 render state
+- 提供哪些材质参数和纹理
+- 哪些变化只改值，哪些变化会改结构
 
-- 已实现：`MaterialTemplate`、`MaterialPassDefinition`、`MaterialInstance` 三层模型已经存在。
-- 已实现：instance 级 pass enable/disable 和场景传播已经落地，见 [`REQ-022`](../../requirements/022-material-pass-selection.md)。
-- 部分实现：自定义材质模板已经可以直接通过 C++ API 组装，但“统一的模板 loader 契约”还没有收敛成使用者入口。
-- 尚未实现：统一的自定义材质模板加载契约，见 [`REQ-025`](../../requirements/025-custom-material-template-and-loader.md)。
+也正因为这一层存在，scene 才能在前端完成结构校验，pipeline 链路也才能拿到稳定的身份和构建输入。
 
-## 常见使用方式
+## 建议的阅读顺序
 
-最常见的路径是：
+如果准备把这一组文档展开来读，按下面顺序最顺：
 
-1. loader 创建 `MaterialTemplate` 或直接返回 `MaterialInstance`。
-2. 用 `setVec3` / `setFloat` / `setInt` / `setTexture` 写入运行时参数。
-3. 调用 `updateUBO()` 把 dirty 标记推到 GPU 资源包装层。
-4. 把材质交给 `SceneNode`。
+1. [材质模板：一张蓝图如何描述多个 pass](template-blueprint.md)
+2. [Shader 在材质系统里扮演什么角色](shader.md)
+3. [材质模板为什么会影响 pipeline](template-and-pipeline.md)
+4. [材质实例如何承接运行时状态](material-instance.md)
+5. [怎样定义自己的材质模板](custom-template.md)
 
-如果你改的是 `setPassEnabled(pass, enabled)`，这属于结构性变化，会影响所有共享该实例的节点；普通参数写入不会触发 scene 级重验证。关于这些变化如何进入 pipeline 身份和构建，继续看 [渲染管线](../pipeline/index.md)。
+## 当前代码已经走到哪一步
 
-## 与其他概念的关系
+当前实现已经不是概念草图，而是主路径的一部分：
 
-- 和 [资产系统](../assets/index.md)：material loader 是资产进入运行时的一条关键入口。
-- 和 [几何系统](../geometry/index.md)：geometry 提供 vertex input，material 提供 shader/pass/render state；两者共同组成 `PipelineKey`。
-- 和 [场景对象](../scene/index.md)：`SceneNode` 持有 `MaterialInstance`，并用它做 pass 级结构校验。
-- 和 [光源系统](../light/index.md) / [相机系统](../camera/index.md)：scene-level 资源由 scene 追加，材质不直接拥有它们。
+- `MaterialTemplate`
+- `MaterialPassDefinition`
+- `MaterialInstance`
+- instance 级 pass enable / disable
+- 反射驱动的 `MaterialUBO` 写入
+- 按 pass 的 `RenderState` / render signature / `PipelineKey` 链路
 
-## 示例代码
+这些都已经在当前代码里工作。
 
-```cpp
-auto material = LX_infra::loadBlinnPhongMaterial();
-material->setVec3(StringID("baseColor"), {0.8f, 0.2f, 0.1f});
-material->setFloat(StringID("shininess"), 24.0f);
-material->setInt(StringID("enableNormal"), 0);
-material->updateUBO();
+对应的权威约束主要在：
 
-auto node = SceneNode::create("mesh_01", mesh, material, nullptr);
-```
-
-如果你想看更偏实现的分层细节，直接读 [`../../subsystems/material-system.md`](../../subsystems/material-system.md)。
+- [`../../subsystems/material-system.md`](../../subsystems/material-system.md)
+- `openspec/specs/material-system/spec.md`
+- [`../pipeline/index.md`](../pipeline/index.md)

@@ -3,6 +3,7 @@
 #include "core/rhi/index_buffer.hpp"
 #include "core/asset/shader.hpp"
 #include "core/rhi/vertex_buffer.hpp"
+#include "core/utils/hash.hpp"
 #include <cassert>
 #include <cstdint>
 #include <memory>
@@ -33,8 +34,7 @@ public:
 
   size_t getLayoutHash() const {
     size_t hash = vertexBuffer->getLayoutHash();
-    hash ^=
-        indexBuffer->getLayoutHash() + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+    hash_combine(hash, indexBuffer->getLayoutHash());
     return hash;
   }
 

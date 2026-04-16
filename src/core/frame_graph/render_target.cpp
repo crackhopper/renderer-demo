@@ -1,6 +1,6 @@
 #include "core/frame_graph/render_target.hpp"
 
-#include "core/asset/shader.hpp" // for hash_combine
+#include "core/utils/hash.hpp"
 
 namespace LX_core {
 

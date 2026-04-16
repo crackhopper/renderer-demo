@@ -30,12 +30,11 @@ firstItemFromScene(LX_core::Scene &scene, LX_core::StringID pass,
   return q.getItems().front();
 }
 
-/// Construct a default Camera (Forward pass) whose m_target is explicitly set
+/// Construct a default Camera whose m_target is explicitly set
 /// to a default-constructed RenderTarget. Use this in test setup after the
 /// legacy Scene ctor's auto-camera stops being created (task 7).
 inline LX_core::CameraPtr makeDefaultCameraWithTarget() {
-  auto cam =
-      std::make_shared<LX_core::Camera>(LX_core::ResourcePassFlag::Forward);
+  auto cam = std::make_shared<LX_core::Camera>();
   cam->setTarget(LX_core::RenderTarget{});
   return cam;
 }

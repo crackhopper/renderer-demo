@@ -29,10 +29,8 @@ class VulkanShader;
 
 using VulkanBufferPtr = std::unique_ptr<VulkanBuffer>;
 using VulkanTexturePtr = std::unique_ptr<VulkanTexture>;
-using VulkanShaderPtr = std::unique_ptr<VulkanShader>;
 
-using VulkanAnyResource =
-    std::variant<VulkanBufferPtr, VulkanTexturePtr, VulkanShaderPtr>;
+using VulkanAnyResource = std::variant<VulkanBufferPtr, VulkanTexturePtr>;
 
 class VulkanResourceManager;
 using VulkanResourceManagerPtr = std::unique_ptr<VulkanResourceManager>;
@@ -60,7 +58,6 @@ public:
 
   std::optional<std::reference_wrapper<VulkanBuffer>> getBuffer(void *handle);
   std::optional<std::reference_wrapper<VulkanTexture>> getTexture(void *handle);
-  std::optional<std::reference_wrapper<VulkanShader>> getShader(void *handle);
   VulkanRenderPass &getRenderPass();
 
   /// Delegates to the embedded PipelineCache. Kept for backward compatibility

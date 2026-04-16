@@ -191,14 +191,13 @@ SkeletonPtr makeSkeleton() {
 }
 
 MaterialInstancePtr makeMaterial(bool skinning) {
-  return loadBlinnPhongMaterial(ResourcePassFlag::Forward,
-                                {ShaderVariant{"USE_LIGHTING", true},
+  return loadBlinnPhongMaterial({ShaderVariant{"USE_LIGHTING", true},
                                  ShaderVariant{"USE_SKINNING", skinning}});
 }
 
 MaterialInstancePtr
 makeMaterial(std::vector<ShaderVariant> variants) {
-  return loadBlinnPhongMaterial(ResourcePassFlag::Forward, std::move(variants));
+  return loadBlinnPhongMaterial(std::move(variants));
 }
 
 bool hasBinding(const std::vector<IRenderResourcePtr> &resources,
@@ -312,7 +311,7 @@ void testOrdinaryMaterialWritesDoNotChangeValidatedPassState() {
   EXPECT(beforeB.has_value(), "nodeB validated before non-structural write");
 
   material->setFloat(StringID("shininess"), 42.0f);
-  material->updateUBO();
+  material->syncGpuData();
 
   auto afterA = nodeA->getValidatedPassData(Pass_Forward);
   auto afterB = nodeB->getValidatedPassData(Pass_Forward);

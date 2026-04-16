@@ -423,8 +423,9 @@ static bool testBlinnPhongPushConstantAbi(const std::filesystem::path &vertPath,
   std::cout << "  Test: BlinnPhong push constant ABI\n";
   std::cout << "========================================\n";
 
-  if (sizeof(PC_Base) != sizeof(Mat4f) || sizeof(PC_Draw) != sizeof(Mat4f)) {
-    std::cerr << "  FAIL: PC_Base/PC_Draw size mismatch with Mat4f\n";
+  if (sizeof(PerDrawLayoutBase) != sizeof(Mat4f) ||
+      sizeof(PerDrawLayout) != sizeof(Mat4f)) {
+    std::cerr << "  FAIL: PerDrawLayoutBase/PerDrawLayout size mismatch with Mat4f\n";
     return false;
   }
 
@@ -443,7 +444,7 @@ static bool testBlinnPhongPushConstantAbi(const std::filesystem::path &vertPath,
     return false;
   }
 
-  std::cout << "  PASS: PC ABI is model-only in C++ and GLSL\n";
+  std::cout << "  PASS: per-draw ABI is model-only in C++ and GLSL\n";
   return true;
 }
 

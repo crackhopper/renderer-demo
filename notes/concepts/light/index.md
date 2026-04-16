@@ -1,59 +1,33 @@
-# 光源系统
+# 光照参数怎样进入场景
 
-这篇文档面向引擎使用者，解释光源对象、scene-level 光照资源，以及当前项目里“已实现”和“尚未实现”的光照能力边界。
+这篇文档讨论的重点不是一般性的光照理论，而是当前项目里的光源对象是什么、它们解决什么问题，以及光照参数怎样进入 scene 和 shader。
 
-## 你会在什么场景接触它
+## 当前的光源骨架是什么
 
-当前代码里你真正会直接用到的光源类型只有 `DirectionalLight`。
+现在这套光源系统还比较朴素。
 
-典型场景有两类：
+当前真正可直接使用的光源类型只有 `DirectionalLight`。它建立在一个更抽象的基类之上：
 
-- 给前向渲染物体提供方向光参数。
-- 按 pass 控制某个光源是否参与 `Forward`、`Deferred` 或 `Shadow`。
+- `LightBase`
+- `DirectionalLight`
 
-## 它负责什么
+`LightBase` 负责统一入口，例如 `getUBO()`、`supportsPass(pass)`；`DirectionalLight` 则给出一份具体的 `DirectionalLightData`。
 
-当前光源系统分两层：
+所以，这个系统现在更接近“方向光 + scene-level light resource”的最小骨架。
 
-- `LightBase`：抽象出 `getPassMask()`、`getUBO()`、`supportsPass(pass)` 这三个运行时入口。
-- `DirectionalLight`：提供一份 `DirectionalLightUBO`。
+## 它解决什么问题
 
-因此，光源系统当前主要负责：
+光源系统解决的是“把光照参数稳定地送进场景和 shader”这个问题。
 
-- 保存“这个光源参加哪些 pass”的掩码。
-- 向 shader 提供 `LightUBO` 这份 scene-level 资源。
+在当前实现里，它最直接的作用是：
 
-它不负责：
+- 保存光源方向、颜色 / 强度
+- 控制这个光源参加哪些 pass
+- 在 queue 构建时，把 `LightUBO` 当作 scene-level 资源追加到 draw 输入中
 
-- 决定 material pass 的启停，这属于 [材质系统](../material/index.md)。
-- 决定 pipeline 身份和构建，这属于 [渲染管线](../pipeline/index.md)。
-- 提供完整的 IBL / 多光源聚合合同，这些能力还未收敛。
+## 日常使用里的主路径
 
-## 当前实现状态
-
-- 已实现：`DirectionalLight`、`LightBase`、pass mask、scene-level light 资源收集。
-- 部分实现：scene 可以持有多个 `LightBase`，但当前真正稳定的 shader / 资源合同仍以方向光为中心。
-- 尚未实现：`SpotLight`，见 [`REQ-027`](../../requirements/027-spot-light.md)。
-- 尚未实现：IBL 环境光资源接入，见 [`REQ-028`](../../requirements/028-ibl-environment-lighting.md)。
-- 尚未实现：统一的多光源场景资源模型，见 [`REQ-029`](../../requirements/029-multi-light-scene-resource-model.md)。
-
-## 常见使用方式
-
-最常见的写法是从 scene 里取默认光源，然后直接改 `ubo->param`，最后调用 `setDirty()`：
-
-- `dir` 是方向，类型是 `Vec4f`
-- `color` 是颜色 / 强度组合，类型也是 `Vec4f`
-- 如果要改 pass 参与范围，调用 `setPassMask(...)`
-
-`Scene::getSceneLevelResources(pass, target)` 在收集 light 资源时只看 `supportsPass(pass)`，不看 render target。这和 [相机系统](../camera/index.md) 不同：camera 按 target 过滤，light 按 pass 过滤。
-
-## 与其他概念的关系
-
-- 和 [场景对象](../scene/index.md)：scene 持有 `std::vector<LightBasePtr>`，并把命中 pass 的 light UBO 追加到 item 的 descriptor resources 末尾。
-- 和 [材质系统](../material/index.md)：如果 shader 声明了 `LightUBO`，材质 pass 就能消费光照参数。
-- 和 [渲染管线](../pipeline/index.md)：light 本身不直接决定 `PipelineKey`，但会影响某个 pass 下 scene-level 资源的装配方式。
-
-## 示例代码
+最常见的路径是从 scene 里拿默认方向光，然后直接改参数：
 
 ```cpp
 auto dirLight =
@@ -64,4 +38,47 @@ dirLight->ubo->param.color = {1.0f, 1.0f, 1.0f, 1.0f};
 dirLight->ubo->setDirty();
 ```
 
-当前实现入口可以对照 [light.hpp](/home/lx/proj/renderer-demo/src/core/scene/light.hpp:17) 和 [`../../subsystems/scene.md`](../../subsystems/scene.md)。
+如果要控制它参加哪些 pass，可以改 `passMask`。当前 scene 在收集 light 资源时只看 `supportsPass(pass)`，不看 `RenderTarget`。
+
+## 当前代码已经走到哪一步
+
+这套系统已经能稳定支撑“scene 里有方向光，shader 能消费 light UBO”这条主路径。
+
+但它还远没到“完整光照系统”的阶段。
+
+现在的状态可以理解成：
+
+- 已有：`DirectionalLight`、`LightBase`、scene-level light resource、pass mask
+- 部分有：scene 可以持有多个 light object，但完整的多光源 shader 合同还没收口
+- 还没有：`SpotLight`
+- 还没有：IBL 环境光资源接入
+- 还没有：正式的多光源资源模型
+
+对应需求：
+
+- [`REQ-027`](../../requirements/027-spot-light.md)
+- [`REQ-028`](../../requirements/028-ibl-environment-lighting.md)
+- [`REQ-029`](../../requirements/029-multi-light-scene-resource-model.md)
+
+## 这条边界为什么重要
+
+当前光源系统负责的是 scene-level 光照资源，不是材质系统的替代，也不是 pipeline 身份的直接来源。
+
+换句话说：
+
+- 材质决定“某个 pass 要不要使用光照，以及怎么使用”
+- 光源系统提供“当前 scene 里有哪些光照参数可以被消费”
+- 渲染管线再把这些资源和 pass 输入整理成真正的 draw 上下文
+
+## 往实现层再走一步
+
+从实现上看，链路是这样的：
+
+- `Scene` 持有 `std::vector<LightBasePtr>`
+- queue 构建时，scene 会把命中当前 pass 的 light UBO 收集出来
+- shader 如果声明了 `LightUBO`，这份资源就会在 descriptor 组装时被接进去
+
+继续展开时，可以参考：
+
+- [light.hpp](/home/lx/proj/renderer-demo/src/core/scene/light.hpp:17)
+- [`../../subsystems/scene.md`](../../subsystems/scene.md)

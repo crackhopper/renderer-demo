@@ -19,7 +19,7 @@
 - [Shader System](shader-system.md)：GLSL 编译、SPIR-V 反射、`CompiledShader`
 - [Material System](material-system.md)：材质模板、材质实例、反射驱动 UBO
 - [Geometry](geometry.md)：mesh、vertex layout、topology
-- [Skeleton](skeleton.md)：骨骼资源、`SkeletonUBO`
+- [Skeleton](skeleton.md)：骨骼资源、`SkeletonData`
 - [String Interning](string-interning.md)：`GlobalStringTable`、`StringID`、compose
 - [Vulkan Backend](vulkan-backend.md)：后端总览与分模块文档入口
 

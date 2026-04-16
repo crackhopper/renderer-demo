@@ -1,6 +1,6 @@
 # Skeleton
 
-> Skeleton 是独立资源，不再挂在旧组件体系上。它现在只负责骨骼矩阵 UBO 和运行期 descriptor 供给，不再直接参与 pipeline identity。
+> Skeleton 是独立资源，不再挂在旧组件体系上。它现在只负责骨骼矩阵数据和运行期 descriptor 供给，不再直接参与 pipeline identity。
 >
 > 权威 spec: `openspec/specs/skeleton-resource/spec.md`
 
@@ -13,7 +13,7 @@
 ## 核心对象
 
 - `Bone`：单根骨骼的数据。
-- `SkeletonUBO`：GPU 侧骨骼矩阵数组。
+- `SkeletonData`：GPU 侧骨骼矩阵数组。
 - `Skeleton`：骨骼资源管理入口。
 
 ## 典型数据流
@@ -39,7 +39,7 @@
 
 ## 从哪里改
 
-- 想改骨骼上限：同时改 shader 和 `SkeletonUBO`。
+- 想改骨骼上限：同时改 shader 和 `SkeletonData`。
 - 想改 skinned pipeline 身份：看 material pass variants，不要改 `Skeleton`。
 - 想改 descriptor 绑定：看 `getBindingName()` 和 shader block 名。
 

@@ -32,7 +32,6 @@ int runSelf(const std::filesystem::path &self, const char *mode) {
 int invalidNormalWithoutLightingMode() {
   (void)cdToWhereShadersExist("blinnphong_0");
   auto material = loadBlinnPhongMaterial(
-      ResourcePassFlag::Forward,
       {ShaderVariant{"USE_LIGHTING", false},
        ShaderVariant{"USE_UV", true},
        ShaderVariant{"USE_NORMAL_MAP", true}});
@@ -43,7 +42,6 @@ int invalidNormalWithoutLightingMode() {
 int invalidNormalWithoutUvMode() {
   (void)cdToWhereShadersExist("blinnphong_0");
   auto material = loadBlinnPhongMaterial(
-      ResourcePassFlag::Forward,
       {ShaderVariant{"USE_LIGHTING", true},
        ShaderVariant{"USE_UV", false},
        ShaderVariant{"USE_NORMAL_MAP", true}});

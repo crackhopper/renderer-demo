@@ -19,15 +19,14 @@ namespace LX_core {
 
 class Scene;
 
-struct ObjectPC : public IRenderResource {
-  using Ptr = std::shared_ptr<ObjectPC>;
+struct PerDrawData {
+  using Ptr = std::shared_ptr<PerDrawData>;
 
   alignas(16) uint8_t data[128] = {0};
-  uint32_t activeSize = sizeof(PC_Base);
+  uint32_t activeSize = sizeof(PerDrawLayoutBase);
 
-  explicit ObjectPC(ResourcePassFlag passFlag = ResourcePassFlag::Forward)
-      : passFlag(passFlag) {
-    PC_Base base;
+  PerDrawData() {
+    PerDrawLayoutBase base;
     std::memcpy(data, &base, sizeof(base));
   }
 
@@ -38,26 +37,20 @@ struct ObjectPC : public IRenderResource {
     activeSize = sizeof(T);
   }
 
-  ResourcePassFlag getPassFlag() const override { return passFlag; }
-  ResourceType getType() const override { return ResourceType::PushConstant; }
-  const void *getRawData() const override { return data; }
-  u32 getByteSize() const override { return activeSize; }
-
-private:
-  ResourcePassFlag passFlag;
+  const void *rawData() const { return data; }
+  u32 byteSize() const { return activeSize; }
 };
 
-using ObjectPCPtr = ObjectPC::Ptr;
+using PerDrawDataPtr = PerDrawData::Ptr;
 
 struct ValidatedRenderablePassData {
   StringID pass;
   MaterialInstancePtr material;
   IShaderPtr shaderInfo;
-  ObjectPCPtr objectInfo;
+  PerDrawDataPtr drawData;
   IRenderResourcePtr vertexBuffer;
   IRenderResourcePtr indexBuffer;
   std::vector<IRenderResourcePtr> descriptorResources;
-  ResourcePassFlag passMask = ResourcePassFlag::Forward;
   StringID objectSignature;
   PipelineKey pipelineKey;
 };
@@ -69,9 +62,8 @@ public:
   virtual IRenderResourcePtr getVertexBuffer() const = 0;
   virtual IRenderResourcePtr getIndexBuffer() const = 0;
   virtual std::vector<IRenderResourcePtr> getDescriptorResources() const = 0;
-  virtual ResourcePassFlag getPassMask() const = 0;
   virtual IShaderPtr getShaderInfo() const = 0;
-  virtual ObjectPCPtr getObjectInfo() const { return nullptr; }
+  virtual PerDrawDataPtr getPerDrawData() const { return nullptr; }
   virtual StringID getRenderSignature(StringID pass) const = 0;
   virtual bool supportsPass(StringID pass) const = 0;
   virtual std::string getNodeName() const = 0;
@@ -117,9 +109,8 @@ public:
   IRenderResourcePtr getVertexBuffer() const override;
   IRenderResourcePtr getIndexBuffer() const override;
   std::vector<IRenderResourcePtr> getDescriptorResources() const override;
-  ResourcePassFlag getPassMask() const override;
   IShaderPtr getShaderInfo() const override;
-  ObjectPCPtr getObjectInfo() const override { return m_objectPC; }
+  PerDrawDataPtr getPerDrawData() const override { return m_perDrawData; }
   StringID getRenderSignature(StringID pass) const override;
   bool supportsPass(StringID pass) const override;
   std::string getNodeName() const override { return m_nodeName; }
@@ -140,7 +131,7 @@ private:
   MeshPtr m_mesh;
   MaterialInstancePtr m_materialInstance;
   std::optional<SkeletonPtr> m_skeleton;
-  ObjectPCPtr m_objectPC;
+  PerDrawDataPtr m_perDrawData;
   StringID m_debugId;
   std::unordered_map<StringID, ValidatedRenderablePassData, StringID::Hash>
       m_validatedPasses;
@@ -153,7 +144,7 @@ public:
   MeshPtr mesh;
   MaterialInstancePtr material;
   std::optional<SkeletonPtr> skeleton;
-  ObjectPCPtr objectPC;
+  PerDrawDataPtr perDrawData;
   std::string nodeName = "RenderableSubMesh";
 
   RenderableSubMesh(MeshPtr mesh_, MaterialInstancePtr material_,
@@ -163,9 +154,8 @@ public:
   IRenderResourcePtr getVertexBuffer() const override;
   IRenderResourcePtr getIndexBuffer() const override;
   std::vector<IRenderResourcePtr> getDescriptorResources() const override;
-  ResourcePassFlag getPassMask() const override;
   IShaderPtr getShaderInfo() const override;
-  ObjectPCPtr getObjectInfo() const override { return objectPC; }
+  PerDrawDataPtr getPerDrawData() const override { return perDrawData; }
   StringID getRenderSignature(StringID pass) const override;
   bool supportsPass(StringID pass) const override;
   std::string getNodeName() const override { return nodeName; }

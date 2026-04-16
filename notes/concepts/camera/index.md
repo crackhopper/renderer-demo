@@ -1,54 +1,38 @@
-# 相机系统
+# 相机怎样进入一帧渲染
 
-这篇文档面向引擎使用者，解释相机对象、投影模式、渲染目标，以及相机如何参与 scene-level 资源收集。
+这篇文档讨论的重点不是“相机有哪些字段”，而是当前这套引擎怎样理解相机，以及相机资源是怎样进入 scene 与渲染路径的。
 
-## 你会在什么场景接触它
+## 相机在这里首先是 scene-level 资源
 
-你通常会在三种地方直接碰到相机系统：
+当前项目里的相机系统是比较轻的。
 
-- 场景初始化后，从 `Scene::getCameras()` 里拿到默认相机，或者自己 `scene->addCamera(...)`。
-- 每帧 update hook 里修改相机位置、朝向、投影参数，然后调用 `updateMatrices()`。
-- 当一个场景存在多个输出目标时，用 `setTarget(target)` 指定这台相机服务哪个 `RenderTarget`。
+`Camera` 本身主要保存三类东西：
 
-## 它负责什么
+- CPU 端的相机参数：`position`、`target`、`up`、投影参数
+- GPU 可上传的 `CameraData`
+- 可选的 `RenderTarget` 绑定关系
 
-当前相机系统主要负责：
+也就是说，这里的相机首先是一个 scene-level 资源对象，而不是一个自己会跑输入逻辑的 controller。
 
-- 保存 CPU 端相机参数，例如 position、target、up、Perspective / Orthographic 投影参数。
-- 维护一份 GPU 可上传的 `CameraUBO`。
-- 可选绑定一个 `RenderTarget`，告诉 scene 过滤逻辑“这台相机服务哪个输出目标”。
+## 这套系统解决什么问题
 
-它不负责：
+相机系统解决的是“从哪里看场景、把哪份观察参数送进 shader、以及它服务哪个输出目标”这几个问题。
 
-- 决定对象参加哪些 material pass。
-- 构建 pipeline 或决定 `PipelineKey`。
-- 自动驱动控制器更新，这属于上层运行时编排。
+在当前实现里，它最直接的作用是：
 
-## 当前实现状态
+- 决定 view / projection 矩阵
+- 生成 `CameraData`
+- 帮 scene 在 `(pass, target)` 维度上选出该用哪份 camera 资源
 
-- 已实现：Perspective / Orthographic 两种投影模式。
-- 已实现：camera target 与 `RenderTarget` 绑定，scene 会按 `(pass, target)` 收集命中的 `CameraUBO`。
-- 尚未实现：Orbit / FreeFly 控制器本体，见 [`REQ-015`](../../requirements/015-orbit-camera-controller.md) 和 [`REQ-016`](../../requirements/016-freefly-camera-controller.md)。
-- 尚未实现：camera visibility layer / layer mask，见 [`REQ-026`](../../requirements/026-camera-visibility-layer-mask.md)。
+## 日常使用里的主路径
 
-## 常见使用方式
+最常见的用法很简单：
 
-最常见的路径是：
+1. 从 `Scene` 里拿一个 camera
+2. 改 `position`、`target`、`up`、`aspect`
+3. 调 `updateMatrices()`
 
-1. 拿到相机对象。
-2. 修改 `position/target/up/aspect` 等字段。
-3. 调用 `updateMatrices()`。
-4. 如果相机要输出到特定 target，额外调用 `setTarget(target)`。
-
-当前 `Scene::getSceneLevelResources(pass, target)` 只会挑选 `matchesTarget(target)` 的相机 UBO。注意这里的 target 过滤和 material pass 是两条线：相机决定“哪个输出目标使用这份 camera 资源”，并不直接决定材质 pass。后者请看 [渲染管线](../pipeline/index.md)。
-
-## 与其他概念的关系
-
-- 和 [场景对象](../scene/index.md)：scene 持有 `std::vector<CameraPtr>`，并把命中 target 的 `CameraUBO` 加到 scene-level 资源列表。
-- 和 [材质系统](../material/index.md)：如果 shader 声明了 `CameraUBO`，材质 pass 就会消费这份 scene-level 资源。
-- 和 [渲染管线](../pipeline/index.md)：camera 不参与 `PipelineKey`，但会影响某个 `(pass, target)` 组合下的 queue 构建结果。
-
-## 示例代码
+例如：
 
 ```cpp
 auto scene = Scene::create(nullptr);
@@ -61,4 +45,53 @@ camera->aspect = 800.0f / 600.0f;
 camera->updateMatrices();
 ```
 
-如果你想看当前实现细节，可以直接看 [camera.hpp](/home/lx/proj/renderer-demo/src/core/scene/camera.hpp:46) 和 [`../../subsystems/scene.md`](../../subsystems/scene.md)。
+如果一个场景有多个输出目标，还可以调用 `setTarget(target)`，让这台相机服务某个特定 `RenderTarget`。
+
+## 当前代码已经走到哪一步
+
+相机本身已经有一套很明确的运行时语义：
+
+- Perspective / Orthographic 两种投影都已存在
+- camera 和 `RenderTarget` 的绑定关系也已接入 scene 资源过滤
+
+但 controller 这条线还没落地。
+
+所以当前的状态是：
+
+- 相机数据对象和 target 过滤已经有了
+- Orbit / FreeFly controller 还没有正式实现
+- camera visibility layer / layer mask 也还没有
+
+对应需求：
+
+- [`REQ-015`](../../requirements/015-orbit-camera-controller.md)
+- [`REQ-016`](../../requirements/016-freefly-camera-controller.md)
+- [`REQ-026`](../../requirements/026-camera-visibility-layer-mask.md)
+
+## 这条边界为什么重要
+
+相机系统负责的是“观察参数”和“target 过滤”。
+
+它不直接决定：
+
+- 某个对象参加哪些 material pass
+- pipeline 身份怎么组成
+- scene 里有哪些 renderable
+
+所以，当我们在代码里看到 `Scene::getSceneLevelResources(pass, target)` 时，可以把 camera 理解为：
+
+它负责在当前 target 下提供一份 scene-level `CameraData`，而不是直接干预材质 pass。
+
+## 往实现层再走一步
+
+从底层看，这条链路很直接：
+
+- `Camera` 维护自己的矩阵和 `CameraData`
+- `Scene` 持有 `std::vector<CameraPtr>`
+- queue 构建前，scene 会按 `matchesTarget(target)` 收集命中的 camera 资源
+- shader 如果声明了 `CameraUBO`，后续 descriptor 装配就会把这份 `CameraData` 接进去
+
+继续展开时，可以参考：
+
+- [camera.hpp](/home/lx/proj/renderer-demo/src/core/scene/camera.hpp:46)
+- [`../../subsystems/scene.md`](../../subsystems/scene.md)

@@ -139,7 +139,7 @@ int main() {
     material->setFloat(StringID("metallicFactor"), 0.0f);
     material->setVec4(StringID("baseColorFactor"),
                       Vec4f{0.80f, 0.15f, 0.15f, 1.0f});
-    material->updateUBO();
+    material->syncGpuData();
 
     auto skeleton = Skeleton::create({});
     auto renderable =
@@ -169,9 +169,9 @@ int main() {
         camera->fovY = 45.0f;
         camera->updateMatrices();
 
-        PC_Draw pc{};
+        PerDrawLayout pc{};
         pc.model = Mat4f::rotationY(static_cast<float>(clock.totalTime()) * 0.8f);
-        renderable->objectPC->update(pc);
+        renderable->perDrawData->update(pc);
     });
 
     loop.run();
@@ -206,8 +206,8 @@ EngineLoop::startScene(scene)
 ```
 [EngineLoop / main loop]
   clock.tick()
-  camera->updateMatrices()     → CameraUBO::setDirty()
-  renderable->objectPC->update → ObjectPC.data 内联更新 (PushConstant 不走 dirty)
+  camera->updateMatrices()     → CameraData::setDirty()
+  renderable->perDrawData->update → PerDrawData.data 内联更新 (PushConstant 不走 dirty)
     │
 renderer->uploadData()
   ├─ 扫描 FrameGraph 的所有 pass/item
@@ -220,7 +220,7 @@ renderer->draw()
   ├─ for each item in pass.queue:
   │     pipeline = resourceManager.getOrCreateRenderPipeline(item)  // cache 命中
   │     cmd->bindPipeline / bindResources / drawItem
-  │       drawItem 会把 item.objectInfo.data 写为 push constant
+  │       drawItem 会把 item.drawData.data 写为 push constant
   └─ submit / present
 ```
 
@@ -228,7 +228,7 @@ renderer->draw()
 
 ## Model 矩阵的旋转
 
-`Mat4f::rotationY(radians)` 已经被当前示例风格默认接受。并且现在 `PC_Draw` 只保留 `model`，不再有旧文档里那些 `enableLighting` / `enableSkinning` 字段。
+`Mat4f::rotationY(radians)` 已经被当前示例风格默认接受。并且现在 `PerDrawLayout` 只保留 `model`，不再有旧文档里那些 `enableLighting` / `enableSkinning` 字段。
 
 ```cpp
 Mat4f rotY(float rad) {

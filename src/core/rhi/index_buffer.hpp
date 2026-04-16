@@ -1,5 +1,6 @@
 #pragma once
 #include "core/rhi/render_resource.hpp"
+#include "core/utils/hash.hpp"
 #include "core/utils/string_table.hpp"
 #include <algorithm>
 #include <functional>
@@ -76,10 +77,9 @@ public:
    * 拓扑结构是管线状态的一部分，必须参与哈希
    */
   size_t getLayoutHash() const {
-    size_t h = std::hash<uint32_t>{}(static_cast<uint32_t>(m_topology));
-    // 混合索引位宽信息
-    h ^= std::hash<uint32_t>{}(static_cast<uint32_t>(getIndexType())) +
-         0x9e3779b9 + (h << 6) + (h >> 2);
+    size_t h = 0;
+    hash_combine(h, static_cast<uint32_t>(m_topology));
+    hash_combine(h, static_cast<uint32_t>(getIndexType()));
     return h;
   }
 

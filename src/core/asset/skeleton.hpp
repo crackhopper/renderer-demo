@@ -21,9 +21,8 @@ struct Bone {
   Vec3f scale = Vec3f(1, 1, 1);
 };
 
-struct alignas(16) SkeletonUBO : public IRenderResource {
-  SkeletonUBO(const std::vector<Bone> &bones, ResourcePassFlag passFlag)
-      : m_passFlag(passFlag) {}
+struct alignas(16) SkeletonData : public IRenderResource {
+  explicit SkeletonData(const std::vector<Bone> &bones) {}
 
   void updateBy(const std::vector<Bone> &bones) {
     assert(bones.size() <= MAX_BONE_COUNT);
@@ -66,7 +65,6 @@ struct alignas(16) SkeletonUBO : public IRenderResource {
     return true;
   }
 
-  ResourcePassFlag getPassFlag() const override { return m_passFlag; }
   ResourceType getType() const override { return ResourceType::UniformBuffer; }
   static constexpr u32 ResourceSize = MAX_BONE_COUNT * sizeof(Mat4f);
   const void *getRawData() const override { return m_bones; }
@@ -78,10 +76,9 @@ struct alignas(16) SkeletonUBO : public IRenderResource {
 
 private:
   Mat4f m_bones[MAX_BONE_COUNT];
-  ResourcePassFlag m_passFlag = ResourcePassFlag::Forward;
 };
 
-using SkeletonUboPtr = std::shared_ptr<SkeletonUBO>;
+using SkeletonDataPtr = std::shared_ptr<SkeletonData>;
 
 class Skeleton;
 using SkeletonPtr = std::shared_ptr<Skeleton>;
@@ -90,15 +87,12 @@ class Skeleton {
   class Token {};
 
 public:
-  Skeleton(Token token, const std::vector<Bone> &bones,
-           ResourcePassFlag passFlag = ResourcePassFlag::Forward)
-      : bones(bones), ubo(std::make_shared<SkeletonUBO>(bones, passFlag)) {}
+  Skeleton(Token token, const std::vector<Bone> &bones)
+      : bones(bones), ubo(std::make_shared<SkeletonData>(bones)) {}
 
-  static SkeletonPtr
-  create(const std::vector<Bone> &bones,
-         ResourcePassFlag passFlag = ResourcePassFlag::Forward) {
+  static SkeletonPtr create(const std::vector<Bone> &bones) {
     Token token;
-    return std::make_shared<Skeleton>(token, bones, passFlag);
+    return std::make_shared<Skeleton>(token, bones);
   }
 
   bool addBone(const Bone &bone) {
@@ -110,12 +104,12 @@ public:
     return true;
   }
 
-  void updateUBO() { ubo->updateBy(bones); }
+  void syncGpuData() { ubo->updateBy(bones); }
 
-  SkeletonUboPtr getUBO() const { return ubo; }
+  SkeletonDataPtr getUBO() const { return ubo; }
 private:
   std::vector<Bone> bones;
-  SkeletonUboPtr ubo;
+  SkeletonDataPtr ubo;
 };
 
 } // namespace LX_core

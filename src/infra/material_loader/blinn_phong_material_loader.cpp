@@ -83,8 +83,7 @@ void validateForwardVariants(const std::vector<LX_core::ShaderVariant> &variants
 } // namespace
 
 LX_core::MaterialInstancePtr
-loadBlinnPhongMaterial(LX_core::ResourcePassFlag passFlag,
-                       std::vector<LX_core::ShaderVariant> variants) {
+loadBlinnPhongMaterial(std::vector<LX_core::ShaderVariant> variants) {
   const std::string baseName = "blinnphong_0";
   variants = normalizeForwardVariants(variants);
   validateForwardVariants(variants);
@@ -138,7 +137,7 @@ loadBlinnPhongMaterial(LX_core::ResourcePassFlag passFlag,
   tmpl->setPass(LX_core::Pass_Forward, std::move(entry));
   tmpl->buildBindingCache();
 
-  auto mat = LX_core::MaterialInstance::create(tmpl, passFlag);
+  auto mat = LX_core::MaterialInstance::create(tmpl);
 
   // Seed default uniform values matching the previous BlinnPhongMaterialUBO
   // defaults. Member names come from the GLSL declaration in
@@ -151,7 +150,7 @@ loadBlinnPhongMaterial(LX_core::ResourcePassFlag passFlag,
               isVariantEnabled(variants, "USE_UV") ? 1 : 0);
   mat->setInt(LX_core::StringID("enableNormal"),
               isVariantEnabled(variants, "USE_NORMAL_MAP") ? 1 : 0);
-  mat->updateUBO();
+  mat->syncGpuData();
 
   return mat;
 }

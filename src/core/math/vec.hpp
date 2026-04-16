@@ -1,5 +1,6 @@
 #pragma once
 #include "core/platform/types.hpp" // i32, f32, f64
+#include "core/utils/hash.hpp"
 #include <cassert>
 #include <cmath>
 #include <functional>
@@ -103,7 +104,7 @@ template <typename Derived, typename T, int N> struct VecBase {
         } else {
           hi = std::hash<T>()(v[i]);
         }
-        h ^= hi + 0x9e3779b9 + (h << 6) + (h >> 2);
+        hash_combine(h, hi);
       }
       return h;
     }

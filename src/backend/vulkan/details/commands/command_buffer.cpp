@@ -195,10 +195,10 @@ void VulkanCommandBuffer::bindResources(VulkanResourceManager &resourceManager,
     }
   }
 
-  if (item.objectInfo && m_pushConstants.size > 0) {
+  if (item.drawData && m_pushConstants.size > 0) {
     vkCmdPushConstants(m_handle, m_pipelineLayout, m_pushConstants.stageFlags,
                        m_pushConstants.offset, m_pushConstants.size,
-                       item.objectInfo->getRawData());
+                       item.drawData->rawData());
   }
 }
 

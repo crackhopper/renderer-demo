@@ -33,13 +33,6 @@ public:
 
   std::string getShaderName() const override { return m_logicalName; }
 
-  // --- IRenderResource interface ---
-  LX_core::ResourcePassFlag getPassFlag() const override {
-    return LX_core::ResourcePassFlag::Forward;
-  }
-  const void *getRawData() const override { return nullptr; }
-  u32 getByteSize() const override { return 0; }
-
 private:
   void buildIndices();
   void computeHash();

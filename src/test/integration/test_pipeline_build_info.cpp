@@ -62,9 +62,6 @@ public:
   size_t getProgramHash() const override { return 0; }
   std::string getShaderName() const override { return "fake_shader"; }
 
-  const void *getRawData() const override { return nullptr; }
-  u32 getByteSize() const override { return 0; }
-
 private:
   std::vector<ShaderResourceBinding> m_bindings;
   std::vector<ShaderStageCode> m_stages;

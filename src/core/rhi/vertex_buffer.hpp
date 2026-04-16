@@ -1,6 +1,7 @@
 #pragma once
 #include "core/rhi/render_resource.hpp"
 #include "core/math/vec.hpp"
+#include "core/utils/hash.hpp"
 #include "core/utils/string_table.hpp"
 #include <any>
 #include <array>
@@ -56,14 +57,13 @@ struct VertexLayoutItem {
   VertexInputRate inputRate = VertexInputRate::Vertex;
 
   size_t hash() const {
-    size_t h = std::hash<std::string>{}(name);
-    h ^= std::hash<uint32_t>{}(location) + 0x9e3779b9 + (h << 6) + (h >> 2);
-    h ^= std::hash<uint32_t>{}(static_cast<uint32_t>(type)) + 0x9e3779b9 +
-         (h << 6) + (h >> 2);
-    h ^= std::hash<uint32_t>{}(offset) + 0x9e3779b9 + (h << 6) + (h >> 2);
+    size_t h = 0;
+    hash_combine(h, name);
+    hash_combine(h, location);
+    hash_combine(h, static_cast<uint32_t>(type));
+    hash_combine(h, offset);
     // 必须包含这个，否则 PSO 缓存会把实例化布局和普通布局混淆
-    h ^= std::hash<uint32_t>{}(static_cast<uint32_t>(inputRate)) + 0x9e3779b9 +
-         (h << 6) + (h >> 2);
+    hash_combine(h, static_cast<uint32_t>(inputRate));
     return h;
   }
 
@@ -119,11 +119,9 @@ public:
 private:
   void updateHash() {
     m_hash = 0;
-    for (auto &i : m_items) {
-      size_t h = i.hash();
-      m_hash ^= h + 0x9e3779b9 + (m_hash << 6) + (m_hash >> 2);
-    }
-    m_hash ^= std::hash<uint32_t>{}(m_stride);
+    for (const auto &item : m_items)
+      hash_combine(m_hash, item.hash());
+    hash_combine(m_hash, m_stride);
   }
 
 private:

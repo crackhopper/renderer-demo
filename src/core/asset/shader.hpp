@@ -1,6 +1,7 @@
 #pragma once
 #include "core/rhi/render_resource.hpp"
 #include "core/rhi/vertex_buffer.hpp"
+#include "core/utils/hash.hpp"
 #include "core/utils/string_table.hpp"
 #include <algorithm>
 #include <functional>
@@ -11,15 +12,6 @@
 #include <vector>
 
 namespace LX_core {
-
-/*****************************************************************
- * hash helper
- *****************************************************************/
-template <class T>
-inline void hash_combine(std::size_t &seed, const T &v) {
-  std::hash<T> hasher;
-  seed ^= hasher(v) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-}
 
 /*****************************************************************
  * Shader enums
@@ -123,7 +115,7 @@ struct VertexInputAttribute {
 /*****************************************************************
  * IShader
  *****************************************************************/
-class IShader : public IRenderResource {
+class IShader {
 public:
   virtual ~IShader() = default;
 
@@ -156,8 +148,6 @@ public:
   /// Logical shader basename for file-based pipelines (e.g. `blinnphong_0`).
   /// Default empty: render path may fall back to a fixed pipeline key.
   virtual std::string getShaderName() const { return {}; }
-
-  ResourceType getType() const override { return ResourceType::Shader; }
 };
 
 using IShaderPtr = std::shared_ptr<IShader>;
@@ -227,7 +217,8 @@ struct ShaderProgramSet {
 
 private:
   void recomputeHash() const {
-    size_t h = std::hash<std::string>{}(shaderName);
+    size_t h = 0;
+    hash_combine(h, shaderName);
 
     // 收集 enabled
     std::vector<std::string> enabled;
@@ -256,10 +247,11 @@ namespace std {
 template <>
 struct hash<LX_core::ShaderResourceBinding> {
   size_t operator()(const LX_core::ShaderResourceBinding &b) const {
-    size_t h = std::hash<std::string>{}(b.name);
+    size_t h = 0;
     LX_core::hash_combine(h, b.set);
     LX_core::hash_combine(h, b.binding);
-    LX_core::hash_combine(h, static_cast<uint32_t>(b.stageFlags));
+    LX_core::hash_combine(h, static_cast<uint32_t>(b.type));
+    LX_core::hash_combine(h, b.descriptorCount);
     return h;
   }
 };

@@ -37,7 +37,7 @@
 
 - `Mesh::getRenderSignature(pass)` 目前保留 `pass` 参数但并不使用；当前只由 vertex layout signature 和 topology signature 组成。
 - `PipelineBuildDesc::fromRenderingItem(...)` 当前抽取的字段是 `key`、`stages`、`bindings`、`vertexLayout`、`renderState`、`topology`、`pushConstant`。
-- 当前 push constant 约定仍是 backend 的固定范围，但 shader ABI 已收敛成 model-only；`PC_Draw` 只是 `PC_Base` 的别名。
+- 当前 push constant 约定仍是 backend 的固定范围，但 shader ABI 已收敛成 model-only；`PerDrawLayout` 只是 `PerDrawLayoutBase` 的别名。
 - shader variants 排序逻辑仍存在于 `ShaderProgramSet`，因此同一组 variants 的插入顺序不会影响最终 identity。
 
 ## 从哪里改

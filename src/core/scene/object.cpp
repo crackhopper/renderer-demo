@@ -89,11 +89,10 @@ buildLegacyValidatedData(const RenderableSubMesh &sub, StringID pass) {
   data.pass = pass;
   data.material = sub.material;
   data.shaderInfo = sub.material ? sub.material->getShaderInfo(pass) : nullptr;
-  data.objectInfo = sub.objectPC;
+  data.drawData = sub.perDrawData;
   data.vertexBuffer = sub.getVertexBuffer();
   data.indexBuffer = sub.getIndexBuffer();
   data.descriptorResources = sub.getDescriptorResources();
-  data.passMask = sub.getPassMask();
   data.objectSignature = sub.getRenderSignature(pass);
   if (sub.material) {
     data.pipelineKey = PipelineKey::build(data.objectSignature,
@@ -108,7 +107,7 @@ SceneNode::SceneNode(std::string nodeName, MeshPtr mesh,
                      MaterialInstancePtr material, SkeletonPtr skeleton)
     : m_nodeName(std::move(nodeName)), m_mesh(std::move(mesh)),
       m_materialInstance(std::move(material)),
-      m_objectPC(std::make_shared<ObjectPC>()) {
+      m_perDrawData(std::make_shared<PerDrawData>()) {
   if (skeleton) {
     m_skeleton = std::move(skeleton);
   }
@@ -154,11 +153,6 @@ std::vector<IRenderResourcePtr> SceneNode::getDescriptorResources() const {
   if (data)
     return data->get().descriptorResources;
   return {};
-}
-
-ResourcePassFlag SceneNode::getPassMask() const {
-  return m_materialInstance ? m_materialInstance->getPassFlag()
-                            : ResourcePassFlag::Forward;
 }
 
 IShaderPtr SceneNode::getShaderInfo() const {
@@ -281,11 +275,10 @@ void SceneNode::rebuildValidatedCache() {
     data.pass = pass;
     data.material = m_materialInstance;
     data.shaderInfo = shader;
-    data.objectInfo = m_objectPC;
+    data.drawData = m_perDrawData;
     data.vertexBuffer = getVertexBuffer();
     data.indexBuffer = getIndexBuffer();
     data.descriptorResources = std::move(descriptorResources);
-    data.passMask = m_materialInstance->getPassFlag();
     data.objectSignature = getRenderSignature(pass);
     data.pipelineKey = PipelineKey::build(
         data.objectSignature, m_materialInstance->getRenderSignature(pass));
@@ -324,8 +317,7 @@ RenderableSubMesh::RenderableSubMesh(MeshPtr mesh_,
   if (skeleton_) {
     skeleton = skeleton_;
   }
-  objectPC = std::make_shared<ObjectPC>(
-      material ? material->getPassFlag() : ResourcePassFlag::Forward);
+  perDrawData = std::make_shared<PerDrawData>();
 }
 
 IRenderResourcePtr RenderableSubMesh::getVertexBuffer() const {
@@ -351,10 +343,6 @@ std::vector<IRenderResourcePtr> RenderableSubMesh::getDescriptorResources() cons
   return ret;
 }
 
-ResourcePassFlag RenderableSubMesh::getPassMask() const {
-  return material ? material->getPassFlag() : ResourcePassFlag::Forward;
-}
-
 IShaderPtr RenderableSubMesh::getShaderInfo() const {
   return material ? material->getShaderInfo() : nullptr;
 }
@@ -368,9 +356,9 @@ StringID RenderableSubMesh::getRenderSignature(StringID pass) const {
 }
 
 bool RenderableSubMesh::supportsPass(StringID pass) const {
-  const auto flag = passFlagFromStringID(pass);
-  return (static_cast<std::uint32_t>(getPassMask()) &
-          static_cast<std::uint32_t>(flag)) != 0;
+  return material && material->isPassEnabled(pass) &&
+         material->getTemplate() &&
+         material->getTemplate()->getEntry(pass).has_value();
 }
 
 std::optional<std::reference_wrapper<const ValidatedRenderablePassData>>

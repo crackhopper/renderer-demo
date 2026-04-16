@@ -184,8 +184,8 @@ public:
     // There is no more side-channel camera/light UBO injection here.
     m_frameGraph.buildFromScene(*scene);
 
-    // Initial resource sync + push-constant seed for every item across every
-    // pass in the FrameGraph.
+    // Initial resource sync + per-draw payload seed for every item across
+    // every pass in the FrameGraph.
     for (auto &pass : m_frameGraph.getPasses()) {
       for (auto &item : pass.queue.getItems()) {
         resourceManager->syncResource(*cmdBufferMgr, item.vertexBuffer);
@@ -193,10 +193,10 @@ public:
         for (auto &cpuRes : item.descriptorResources) {
           resourceManager->syncResource(*cmdBufferMgr, cpuRes);
         }
-        if (item.objectInfo) {
-          PC_Base pc{};
+        if (item.drawData) {
+          PerDrawLayoutBase pc{};
           pc.model = Mat4f::identity();
-          item.objectInfo->update(pc);
+          item.drawData->update(pc);
         }
       }
     }

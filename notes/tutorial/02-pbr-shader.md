@@ -17,8 +17,8 @@ shaders/glsl/pbr.frag
 
 当前 `pbr.vert` / `pbr.frag` 已经采用了和引擎一致的几个关键约定：
 
-- push constant 块名是 `ObjectPC`
-- `ObjectPC` 目前只包含一个 `mat4 model`
+- push constant 块名仍是 `ObjectPC`
+- 这个 GLSL block 目前只包含一个 `mat4 model`，对应 C++ 侧的 `PerDrawLayout`
 - 相机 UBO 名字是 `CameraUBO`
 - 材质 UBO 名字是 `MaterialUBO`
 - 灯光 UBO 名字是 `LightUBO`
@@ -26,10 +26,10 @@ shaders/glsl/pbr.frag
 
 这几点分别对应：
 
-- `src/core/rhi/render_resource.hpp` 中的 `PC_Draw = PC_Base`
-- `src/core/scene/camera.hpp` 中 `CameraUBO::getBindingName()`
+- `src/core/rhi/render_resource.hpp` 中的 `PerDrawLayout = PerDrawLayoutBase`
+- `src/core/scene/camera.hpp` 中 `CameraData::getBindingName()`
 - `src/core/asset/material_instance.cpp` / `material_instance.hpp` 中 `MaterialUBO` 约定
-- `src/core/scene/light.hpp` 中 `DirectionalLightUBO::getBindingName()`
+- `src/core/scene/light.hpp` 中 `DirectionalLightData::getBindingName()`
 
 换句话说，当前 PBR shader 的问题已经不是“接口名不对”，而是“还没被 loader / example 接起来”。
 
@@ -227,14 +227,14 @@ void main() {
 
 | set | binding | 名字 | 来源 |
 |-----|---------|------|------|
-| 0 | 0 | `CameraUBO` | `Scene::getSceneLevelResources()` → `Camera::ubo` |
+| 0 | 0 | `CameraUBO` | `Scene::getSceneLevelResources()` → `Camera::ubo` (`CameraData`) |
 | 1 | 0 | `MaterialUBO` | `MaterialInstance` 的 std140 字节 buffer |
 | 1 | 1 | `albedoMap` | `MaterialInstance::setTexture(...)` |
 | 2 | 0 | `LightUBO` | `Scene::getSceneLevelResources()` → `DirectionalLight::ubo` |
 
 本项目的 descriptor 绑定由 **反射驱动**，后端真正依赖的是 binding 名和反射结果，而不是你在文档里手抄的表格。只要 shader 里的 UBO / 采样器名字与 C++ 侧资源能对上，set/binding 就能通过反射找到。
 
-- `CameraUBO` — 见 `src/core/scene/camera.hpp:32`，`getBindingName()` 返回 `"CameraUBO"`
+- `CameraUBO` — 见 `src/core/scene/camera.hpp`，`CameraData::getBindingName()` 返回 `"CameraUBO"`
 - `LightUBO` — 见 `src/core/scene/light.hpp:58`，`getBindingName()` 返回 `"LightUBO"`
 - `MaterialUBO` — 见 `src/core/asset/material_instance.hpp` / `src/core/asset/material_instance.cpp`
 

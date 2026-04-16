@@ -9,7 +9,7 @@
 
 namespace LX_core {
 
-struct alignas(16) CameraUBO : public IRenderResource {
+struct alignas(16) CameraData : public IRenderResource {
   struct Param {
     Mat4f view = Mat4f::identity();
     Mat4f proj = Mat4f::identity();
@@ -18,9 +18,6 @@ struct alignas(16) CameraUBO : public IRenderResource {
   };
   Param param{};
 
-  CameraUBO(ResourcePassFlag passFlag) : m_passFlag(passFlag) {}
-
-  virtual ResourcePassFlag getPassFlag() const override { return m_passFlag; }
   virtual ResourceType getType() const override {
     return ResourceType::UniformBuffer;
   }
@@ -33,11 +30,9 @@ struct alignas(16) CameraUBO : public IRenderResource {
     return kName;
   }
 
-private:
-  ResourcePassFlag m_passFlag = ResourcePassFlag::Forward;
 };
 
-using CameraUBOPtr = std::shared_ptr<CameraUBO>;
+using CameraDataPtr = std::shared_ptr<CameraData>;
 
 // Camera 类型枚举
 enum class CameraType { Perspective, Orthographic };
@@ -45,12 +40,10 @@ enum class CameraType { Perspective, Orthographic };
 // CPU 层 Camera 基类
 class Camera {
 public:
-  Camera(ResourcePassFlag passFlag) {
-    ubo = std::make_shared<CameraUBO>(passFlag);
-  }
+  Camera() { ubo = std::make_shared<CameraData>(); }
   virtual ~Camera() = default;
 
-  CameraUBOPtr getUBO() const { return ubo; }
+  CameraDataPtr getUBO() const { return ubo; }
 
   // ========================
   // 相机类型相关属性
@@ -74,7 +67,7 @@ public:
   float bottom = -1.0f;
   float top = 1.0f;
 
-  CameraUBOPtr ubo;
+  CameraDataPtr ubo;
 
   /// REQ-009: the RenderTarget this camera draws to. `nullopt` means
   /// "defaults to the swapchain" — `VulkanRenderer::initScene` is responsible

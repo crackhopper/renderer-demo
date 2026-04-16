@@ -26,13 +26,13 @@
 
 典型资源包括：
 
-- `SkeletonUBO`
-- `UboByteBufferResource`
+- `SkeletonData`
+- `MaterialParameterDataResource`
 - `CombinedTextureSampler`
-- `CameraUBO` / `DirectionalLightUBO`
-- `ObjectPC`
+- `CameraData` / `DirectionalLightData`
+- `PerDrawData`
 
-当前 draw push constant ABI 已收敛成 model-only：`PC_Draw` 只是 `PC_Base` 的别名，真正参与 shader 接口的字段只有 `model`。
+当前 draw push constant ABI 已收敛成 model-only：`PerDrawLayout` 只是 `PerDrawLayoutBase` 的别名，真正参与 shader 接口的字段只有 `model`。
 
 ## 场景到绘制的数据流
 

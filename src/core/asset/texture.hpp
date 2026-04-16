@@ -48,9 +48,7 @@ static TexturePtr createWhiteTexture(u32 width = 1, u32 height = 1) {
 // TODO: 暂时空余采样器信息。
 class CombinedTextureSampler : public IRenderResource {
 public:
-  CombinedTextureSampler(TexturePtr texture,
-                         ResourcePassFlag passFlag = ResourcePassFlag::Forward)
-      : m_texture(texture), m_passFlag(passFlag) {}
+  explicit CombinedTextureSampler(TexturePtr texture) : m_texture(texture) {}
 
   TexturePtr texture() const { return m_texture; }
 
@@ -64,7 +62,6 @@ public:
   /// backend descriptor path. Empty until the material routes it.
   void setBindingName(StringID name) { m_bindingName = name; }
 
-  ResourcePassFlag getPassFlag() const override { return m_passFlag; }
   ResourceType getType() const override {
     return ResourceType::CombinedImageSampler;
   }
@@ -76,7 +73,6 @@ public:
 private:
   TexturePtr m_texture;
   StringID m_bindingName;
-  ResourcePassFlag m_passFlag = ResourcePassFlag::Forward;
 };
 
 using CombinedTextureSamplerPtr = std::shared_ptr<CombinedTextureSampler>;

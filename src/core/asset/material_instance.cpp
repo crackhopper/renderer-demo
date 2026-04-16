@@ -1,6 +1,4 @@
 #include "material_instance.hpp"
-#include "core/frame_graph/pass.hpp"
-
 #include <algorithm>
 #include <cstring>
 #include <iostream>
@@ -37,10 +35,8 @@ const ShaderResourceBinding *findMaterialUboBinding(const IShaderPtr &shader) {
  * MaterialInstance
  *****************************************************************/
 
-MaterialInstance::MaterialInstance(Token, MaterialTemplate::Ptr tmpl,
-                                   ResourcePassFlag passFlag)
+MaterialInstance::MaterialInstance(Token, MaterialTemplate::Ptr tmpl)
     : m_template(std::move(tmpl)) {
-  (void)passFlag;
   if (!m_template) {
     return;
   }
@@ -49,7 +45,7 @@ MaterialInstance::MaterialInstance(Token, MaterialTemplate::Ptr tmpl,
     m_enabledPasses.insert(pass);
   }
 
-  // Convention: the per-material UBO block is named `MaterialUBO` in GLSL.
+  // Convention: the per-material uniform block is named `MaterialUBO` in GLSL.
   // Build the instance-side CPU buffer from the enabled pass shader set rather
   // than assuming the template shader is the one every pass uses.
   const ShaderResourceBinding *selectedBinding = nullptr;
@@ -71,9 +67,8 @@ MaterialInstance::MaterialInstance(Token, MaterialTemplate::Ptr tmpl,
   if (selectedBinding) {
     m_uboBinding = selectedBinding;
     m_uboBuffer.assign(selectedBinding->size, uint8_t{0});
-    m_uboResource = std::make_shared<UboByteBufferResource>(
-        m_uboBuffer, selectedBinding->size,
-        [this]() { return getPassFlag(); });
+    m_uboResource = std::make_shared<MaterialParameterDataResource>(
+        m_uboBuffer, selectedBinding->size);
   }
 }
 
@@ -127,7 +122,7 @@ void MaterialInstance::setTexture(StringID id, CombinedTextureSamplerPtr tex) {
   m_textures[id] = std::move(tex);
 }
 
-void MaterialInstance::updateUBO() {
+void MaterialInstance::syncGpuData() {
   if (!m_uboDirty || !m_uboResource)
     return;
   m_uboResource->setDirty();
@@ -183,18 +178,6 @@ IShaderPtr MaterialInstance::getShaderInfo(StringID pass) const {
       return shader;
   }
   return m_template->getShader();
-}
-
-ResourcePassFlag MaterialInstance::getPassFlag() const {
-  uint32_t mask = 0;
-  if (!m_template)
-    return static_cast<ResourcePassFlag>(0);
-  for (const auto &pass : m_enabledPasses) {
-    if (!hasDefinedPass(pass))
-      continue;
-    mask |= static_cast<uint32_t>(passFlagFromStringID(pass));
-  }
-  return static_cast<ResourcePassFlag>(mask);
 }
 
 RenderState MaterialInstance::getRenderState(StringID pass) const {

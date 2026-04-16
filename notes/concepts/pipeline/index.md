@@ -1,74 +1,105 @@
-# 渲染管线
+# 一条 pipeline 是怎样被确定的
 
-这篇文档面向引擎使用者，解释 pipeline 身份、pipeline 构建输入，以及它们如何从 scene 前端一路流到 backend。
+这篇文档讨论的不是 Vulkan API 细节，而是更靠前的一层：在当前项目里，pipeline 身份是什么、它为什么存在，以及 scene 里的数据怎样一路整理成 pipeline 构建输入。
 
-当前概念区里凡是提到 `PipelineKey`、render signature、pipeline cache、`PipelineBuildDesc` 这些词，默认都应该索引到这篇文章来理解。
+前面那些概念页里，只要提到：
 
-## 你会在什么场景接触它
+- `PipelineKey`
+- render signature
+- `PipelineBuildDesc`
+- pipeline cache
 
-你通常会在三种场景下直接碰到渲染管线：
+都可以把这里当作总入口。
 
-- 改了 mesh layout、material pass 或 shader variant，发现 pipeline 被重新构建。
-- 想知道为什么两个对象能复用同一条 pipeline，或者为什么它们必须分开。
-- 调试 preload / cache miss / runtime build 时，想看 pipeline 身份到底是怎么来的。
+## 我们到底在说什么
 
-## 它负责什么
+在这个项目里，“渲染管线”不是单指 Vulkan 最终创建出来的 pipeline handle。
 
-当前项目里的“渲染管线”概念主要覆盖两件事：
+它更像一整条判断和整理链路，主要回答两个问题：
 
-- **pipeline 身份**：系统如何判断两个 draw 是否可以复用同一条 pipeline。
-- **pipeline 构建输入**：系统如何从 renderable / material / shader reflection 里整理出 backend 真正需要的构建描述。
+1. 两个 draw 能不能复用同一条 pipeline？
+2. 如果要建一条新的 pipeline，backend 需要的完整输入到底是什么？
 
-它不负责：
+第一个问题，对应的是 pipeline 身份；第二个问题，对应的是 pipeline 构建输入。
 
-- 维护 mesh 或 material 的运行时状态本身。
-- 决定 scene 里有哪些对象，这属于 [场景对象](../scene/index.md)。
-- 执行 Vulkan 命令录制细节，那属于 backend 实现。
+## 这一层解决什么问题
 
-## 当前实现状态
+这个系统的价值在于，它把“是否复用”和“如何构建”拆开了。
 
-- 已实现：`getRenderSignature()`、`PipelineKey`、`ValidatedRenderablePassData`、`PipelineBuildDesc::fromRenderingItem(...)`、`PipelineCache`。
-- 已实现：`RenderQueue` 不再现场推断 pipeline 输入，而是消费前端已经验证过的 renderable 数据。
-- 部分实现：少数兼容接口仍保留 Forward-only 过渡语义，但主路径已经是 pass-aware 的 scene -> queue -> pipeline build 链路。
+如果没有这层整理，backend 每次都只能拿到一堆零散状态，自己猜：
 
-## 核心原理
+- 这次和上次是不是同一条 pipeline
+- vertex input 是什么
+- shader stages 是什么
+- render state 是什么
 
-这条链路可以按 5 步理解：
+现在这些事情在 core 层就已经有了更稳定的表达：
 
-1. [几何系统](../geometry/index.md) 提供 object-side render signature。
-2. [材质系统](../material/index.md) 提供 material-side render signature，以及每个 pass 的 shader / render state。
-3. [场景对象](../scene/index.md) 在 `SceneNode::rebuildValidatedCache()` 里对 enabled passes 做结构校验，并把两侧 signature 组合成 `PipelineKey`。
-4. `RenderQueue::buildFromScene(scene, pass, target)` 从 validated 数据生成 `RenderingItem`。
-5. `PipelineBuildDesc::fromRenderingItem(item)` 提取 backend 真正需要的顶点输入、shader stages、descriptor bindings、render state，再交给 cache / backend 去复用或构建。
+- `PipelineKey` 用来表示“是不是同一条 pipeline”
+- `PipelineBuildDesc` 用来表示“如果要建，该拿哪些输入去建”
 
-这意味着：
+## 从 scene 走到 pipeline 的那条线
 
-- `PipelineKey` 负责回答“是不是同一条 pipeline”。
-- `PipelineBuildDesc` 负责回答“如果要建，具体该怎么建”。
+可以把这条链路理解成五步：
 
-## 常见误解
+1. [资产系统](../assets/index.md) 里的网格对象提供几何输入
+2. [材质系统](../material/index.md) 提供 shader、pass、render state 和 variants
+3. [场景对象](../scene/index.md) 在 pass 级结构校验后，整理出稳定的 validated 数据
+4. `RenderQueue::buildFromScene(...)` 把它们装配成 `RenderingItem`
+5. `PipelineBuildDesc::fromRenderingItem(item)` 再提取 backend 真正需要的构建输入
 
-### 误解 1：light 或 camera 会切 pipeline
+在这个过程中，`PipelineKey` 会跟着 validated 数据一起被确定下来。
 
-一般不会。camera 和 light 是 scene-level 资源，更多影响 descriptor 装配和 draw 输入，而不是 `PipelineKey` 本身。真正会稳定切 key 的，仍然是 mesh layout、shader variants、render state、topology 这些结构性因素。
+## 什么会真正影响 pipeline 身份
 
-### 误解 2：改 material 参数就一定重建 pipeline
+在当前实现里，真正稳定影响 pipeline 身份的，主要是这些结构性因素：
 
-不是。改 `setFloat` / `setTexture` / `updateUBO()` 只是值变化，不是结构变化；普通参数更新通常不会改变 `PipelineKey`。真正会触发结构重算的是 pass enable、shader set、variants、render state 这类变化。
+- mesh 的顶点布局
+- primitive topology
+- shader set 和 enabled variants
+- render state
+- pass 维度上的材质定义
 
-### 误解 3：pipeline 是 backend 才开始关心的东西
+反过来，有些东西通常不会直接切 pipeline：
 
-不是。backend 负责执行真正的构建，但 pipeline 身份和输入整理早在 core 层 scene / queue 阶段就已经确定了。
+- 普通材质参数写入
+- 纹理内容变化
+- camera / light 的 scene-level 资源内容变化
 
-## 与其他概念的关系
+这些变化可能会影响 draw 结果，但不一定会改变 `PipelineKey`。
 
-- 和 [几何系统](../geometry/index.md)：几何系统提供 vertex layout / topology，也就是 object-side identity 的主要来源。
-- 和 [材质系统](../material/index.md)：材质系统提供 pass 级 shader、render state、variant，也就是 material-side identity 的主要来源。
-- 和 [场景对象](../scene/index.md)：`ValidatedRenderablePassData` 是 pipeline 链路的前端稳定输入包。
-- 和 [相机系统](../camera/index.md) / [光源系统](../light/index.md)：两者主要影响 scene-level descriptor 资源，不是 `PipelineKey` 的核心来源。
+## 当前代码已经走到哪一步
 
-## 继续阅读
+这条主路径已经基本建立起来了：
 
-- pipeline 身份组成：[`../../subsystems/pipeline-identity.md`](../../subsystems/pipeline-identity.md)
-- pipeline 预构建与运行时 miss：[`../../subsystems/pipeline-cache.md`](../../subsystems/pipeline-cache.md)
-- scene 到 queue 的装配路径：[`../../subsystems/frame-graph.md`](../../subsystems/frame-graph.md)
+- `getRenderSignature()`
+- `PipelineKey`
+- `ValidatedRenderablePassData`
+- `PipelineBuildDesc::fromRenderingItem(...)`
+- `PipelineCache`
+
+都已经是当前代码里真实存在的部分。
+
+所以这里不是“未来想这么做”，而是在解释“当前主路径已经怎样工作”。
+
+## 往实现层再走一步
+
+从实现上看，可以粗略记成两段。
+
+第一段是“前端整理”：
+
+- `SceneNode` 做 pass 级结构校验
+- validated 数据里带上 object-side 和 material-side signature
+- 组合出 `PipelineKey`
+
+第二段是“后端消费”：
+
+- `RenderQueue` 生成 `RenderingItem`
+- `PipelineBuildDesc` 从 item 提取构建输入
+- `PipelineCache` 根据 key 做预构建、查找和运行时 miss 处理
+
+继续展开时，可以参考：
+
+- [`../../subsystems/pipeline-identity.md`](../../subsystems/pipeline-identity.md)
+- [`../../subsystems/pipeline-cache.md`](../../subsystems/pipeline-cache.md)
+- [`../../subsystems/frame-graph.md`](../../subsystems/frame-graph.md)

@@ -1,50 +1,78 @@
-# 引擎循环
+# 一帧是怎样被组织起来的
 
-这篇文档面向使用者，解释 `EngineLoop` 为什么存在、它和 scene / renderer / pipeline 的边界是什么，以及一帧是怎么被稳定编排出来的。
+这篇文档讨论的重点不是 while-loop 本身，而是当前项目为什么需要 `EngineLoop`，以及它在运行时到底帮我们组织了什么。
 
-## 你会在什么场景接触它
+## `EngineLoop` 在这里扮演什么角色
 
-- 你想把一个 `Scene` 真正跑起来，而不是手写零散 while-loop。
-- 你想知道业务更新、dirty 上传、draw 之间的顺序为什么不能随便调换。
-- 你在调试“什么时候要 rebuild scene、什么时候只需要 update 数值”。
+`EngineLoop` 是 renderer 之上的运行时编排层。
 
-## 它负责什么
+它不关心 Vulkan 细节，也不负责定义 scene 的结构。它负责的是另一件更实际的事：把“开始一个场景”和“执行一帧”整理成稳定入口。
 
-`EngineLoop` 是 renderer 之上的运行时编排层。它主要负责：
+所以它更像运行时总调度，而不是某个渲染子模块。
 
-- 组织 `startScene(scene)` 与 `tickFrame()` 两类入口。
-- 让 update hook、`uploadData()`、`draw()` 按稳定顺序执行。
-- 把结构性变化和普通 dirty 更新拆开，避免每帧偷偷重建 scene。
+## 这一层解决什么问题
 
-它不负责：
+如果没有 `EngineLoop`，每个 demo 都会自己写一套 while-loop：
 
-- 决定某个对象属于哪个 pass，这属于 [场景对象](scene/index.md) 和 [材质系统](material/index.md)。
-- 决定 pipeline 身份或 pipeline 构建，这属于 [渲染管线](pipeline/index.md)。
-- 执行 Vulkan backend 细节。
+```cpp
+while (running) {
+    updateScene();
+    renderer->uploadData();
+    renderer->draw();
+}
+```
 
-## 当前实现状态
+这不是不能跑，但很容易把几类不同性质的工作揉在一起：
 
-- 已实现：`EngineLoop` 作为运行时编排层的基本职责已经存在，详细实现看设计层文档。
-- 已实现：场景启动与每帧执行被拆成两段，而不是让 demo 自己把所有事揉进一条 while-loop。
+- 哪些事只在场景启动时做一次
+- 哪些事每帧都做
+- update 和 upload / draw 的先后顺序该怎么约束
+- 什么时候需要 rebuild scene，而不是只改 dirty 数据
 
-## 为什么它重要
+`EngineLoop` 的价值，就是把这些边界固定下来。
 
-一帧的推荐顺序不是随意排的，而是：
+## 日常使用里的入口形状
 
-1. 推进时钟。
-2. 执行业务层 update hook。
-3. 上传 dirty 资源。
-4. 执行 draw。
+在日常接入里，最重要的是这几个入口：
 
-这条顺序把“业务更新”和“渲染执行”切开了。scene、material、camera、light 的 CPU 真值先更新，再进入上传和渲染。pipeline 相关结构如果需要重建，也应该通过显式的 scene rebuild 路径处理，而不是混进普通每帧更新。
+- `startScene(scene)`
+- `setUpdateHook(...)`
+- `tickFrame()`
+- `run()`
+- `requestSceneRebuild()`
 
-## 与其他概念的关系
+也就是说，我们不需要每次都重新发明主循环，只需要把 scene 和每帧更新逻辑接进来。
 
-- 和 [场景对象](scene/index.md)：`EngineLoop` 接管 scene 的生命周期，但不接管 scene 结构本身。
-- 和 [相机系统](camera/index.md) / [光源系统](light/index.md)：它决定这些系统的每帧更新时机。
-- 和 [渲染管线](pipeline/index.md)：它负责让 pipeline 所依赖的 scene 结构在正确阶段建立，而不是亲自参与 key 或 build desc 计算。
+## 当前代码已经走到哪一步
 
-## 继续阅读
+这套运行时编排语义已经是当前工程的一部分了：
 
-- 架构总览：[`../architecture.md`](../architecture.md)
-- EngineLoop 设计层文档：[`../subsystems/engine-loop.md`](../subsystems/engine-loop.md)
+- 场景启动和每帧执行已经是两段式
+- update、upload、draw 的顺序已经被明确分开
+
+所以这里不是在讲“未来应该怎样做”，而是在解释“当前这套运行时为什么这样组织”。
+
+## 它怎样和别的系统配合
+
+`EngineLoop` 自己不生产渲染数据，它主要协调别的系统：
+
+- [场景对象](scene/index.md)：提供当前 scene 及其结构
+- [相机系统](camera/index.md) / [光源系统](light/index.md)：在 update 阶段被修改
+- [材质系统](material/index.md)：普通参数更新在每帧路径里推进
+- [渲染管线](pipeline/index.md)：需要结构性重建时，应该走显式 rebuild，而不是混入普通 update
+
+## 往实现层再走一步
+
+从底层看，最重要的不是“它有个 loop”，而是它把一帧拆成了稳定顺序：
+
+1. 推进时钟
+2. 执行业务 update
+3. 上传 dirty 资源
+4. 执行 draw
+
+这个顺序把“业务更新”和“渲染执行”分开了，也把“普通数值变化”和“结构性变化”分开了。
+
+继续展开时，可以参考：
+
+- [`../architecture.md`](../architecture.md)
+- [`../subsystems/engine-loop.md`](../subsystems/engine-loop.md)

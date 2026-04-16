@@ -53,9 +53,6 @@ public:
   }
   size_t getProgramHash() const override { return 0; }
 
-  const void *getRawData() const override { return nullptr; }
-  u32 getByteSize() const override { return 0; }
-
 private:
   std::vector<ShaderStageCode> m_stages;
   std::vector<ShaderResourceBinding> m_bindings;

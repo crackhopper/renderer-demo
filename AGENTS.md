@@ -66,6 +66,7 @@ Detailed specifications live in `openspec/specs/`. Read the relevant spec before
 | Spec | Path | Covers |
 |------|------|--------|
 | **C++ Style Guide** | `openspec/specs/cpp-style-guide/spec.md` | Ownership, smart pointers, RAII, type safety |
+| **Notes Writing Style** | `openspec/specs/notes-writing-style/spec.md` | Voice, structure, and concept/tutorial writing style for `notes/` |
 | **Vulkan Backend** | `openspec/specs/renderer-backend-vulkan/spec.md` | VulkanDevice, Buffer, Texture, Shader, Pipeline, Renderer, CommandBuffer |
 | **String Interning** | `openspec/specs/string-interning/spec.md` | `GlobalStringTable`, `StringID`, thread-safe string-to-int mapping |
 | **Shader Compilation** | `openspec/specs/shader-compilation/spec.md` | Runtime GLSL→SPIR-V via shaderc, variant macros |
@@ -104,6 +105,7 @@ Completed changes are archived in `openspec/changes/archive/`. Active changes ar
 ## Design Documents
 
 Current design-oriented docs now surface under the `设计` menu in the notes site. The underlying files still live in `notes/` and `notes/subsystems/`. Read the relevant doc for architecture context:
+When editing `notes/`, follow `openspec/specs/notes-writing-style/spec.md` for narrative voice, section organization, and concept-page tone.
 
 | Document | Path | Summary |
 |----------|------|---------|

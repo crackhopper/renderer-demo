@@ -7,34 +7,11 @@
 #include <vector>
 
 namespace LX_core {
-// 资源所属的pass
-enum class ResourcePassFlag : u32 {
-  Forward = 0x00000001,
-  Deferred = 0x00000002,
-  Shadow = 0x00000004,
-};
-
-constexpr ResourcePassFlag operator|(ResourcePassFlag a, ResourcePassFlag b) {
-  return static_cast<ResourcePassFlag>(static_cast<u32>(a) |
-                                       static_cast<u32>(b));
-}
-
-constexpr ResourcePassFlag operator&(ResourcePassFlag a, ResourcePassFlag b) {
-  return static_cast<ResourcePassFlag>(static_cast<u32>(a) &
-                                       static_cast<u32>(b));
-}
-
-constexpr ResourcePassFlag All = ResourcePassFlag::Forward |
-                                 ResourcePassFlag::Deferred |
-                                 ResourcePassFlag::Shadow;
-
 // 资源槽位类型，后端根据这个走不同的处理流程。
 enum class ResourceType : u8 {
   None = 0,
-  PushConstant,
   VertexBuffer,
   IndexBuffer,
-  Shader,
   UniformBuffer,
   CombinedImageSampler,
   Special,
@@ -44,12 +21,6 @@ enum class ResourceType : u8 {
 class IRenderResource {
 public:
   virtual ~IRenderResource() = default;
-
-  /// Default for geometry buffers and other resources that do not participate
-  /// in pass scheduling; materials and UBOs override with their pass.
-  virtual ResourcePassFlag getPassFlag() const {
-    return ResourcePassFlag::Forward;
-  }
   virtual ResourceType getType() const = 0;
   virtual const void *getRawData() const = 0;
   virtual u32 getByteSize() const = 0;
@@ -75,11 +46,11 @@ private:
 using IRenderResourcePtr = std::shared_ptr<IRenderResource>;
 
 // 确保与 GLSL 的 std140/std430 布局完全一致
-struct alignas(16) PC_Base {
+struct alignas(16) PerDrawLayoutBase {
   Mat4f model = Mat4f::identity();
 };
 
 /// Transitional alias for the current engine-wide draw push-constant ABI.
-using PC_Draw = PC_Base;
+using PerDrawLayout = PerDrawLayoutBase;
 
 } // namespace LX_core

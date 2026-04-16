@@ -64,7 +64,7 @@ int main() {
 
   auto material = LX_infra::loadBlinnPhongMaterial();
   material->setInt(LX_core::StringID("enableNormal"), 0);
-  material->updateUBO();
+  material->syncGpuData();
 
   auto skeletonPtr = Skeleton::create({});
 

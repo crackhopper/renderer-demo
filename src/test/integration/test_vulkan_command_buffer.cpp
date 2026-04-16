@@ -83,11 +83,10 @@ int main() {
     auto material = LX_infra::loadBlinnPhongMaterial();
     material->setInt(LX_core::StringID("enableNormal"),
                      0); // avoid normal texture
-    material->updateUBO();
+    material->syncGpuData();
 
-    auto renderable =
-        std::make_shared<LX_core::RenderableSubMesh>(meshPtr, material);
-    // Pipeline declares a SkeletonUBO slot; attach an (empty) skeleton so the
+    auto renderable = std::make_shared<LX_core::RenderableSubMesh>(meshPtr, material);
+    // Pipeline declares a skeleton data slot; attach an (empty) skeleton so the
     // descriptor set binding gets a valid buffer to update.
     renderable->skeleton =
         LX_core::Skeleton::create(std::vector<LX_core::Bone>{});
@@ -106,7 +105,7 @@ int main() {
       dirLight->ubo->setDirty();
     }
 
-    // Camera matrices needed for CameraUBO uploads.
+    // Camera matrices needed for camera data uploads.
     camera->position = {0.0f, 0.0f, 3.0f};
     camera->target = {0.0f, 0.0f, 0.0f};
     camera->up = LX_core::Vec3f{0.0f, 1.0f, 0.0f};
@@ -116,10 +115,10 @@ int main() {
         LX_test::firstItemFromScene(*scene, LX_core::Pass_Forward);
 
     // Initialize push constants deterministically.
-    if (renderItem.objectInfo) {
-      LX_core::PC_Draw pc{};
+    if (renderItem.drawData) {
+      LX_core::PerDrawLayout pc{};
       pc.model = LX_core::Mat4f::identity();
-      renderItem.objectInfo->update(pc);
+      renderItem.drawData->update(pc);
     }
 
     // Sync all CPU-side resources to GPU.

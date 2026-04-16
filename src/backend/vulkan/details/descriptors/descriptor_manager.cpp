@@ -1,5 +1,6 @@
 #include "descriptor_manager.hpp"
 #include "../device.hpp"
+#include "core/utils/hash.hpp"
 #include <array>
 #include <stdexcept>
 #include <string>
@@ -32,12 +33,13 @@ size_t
 DescriptorLayoutHasher::operator()(const DescriptorLayoutKey &key) const {
   size_t res = 0;
   for (const auto &b : key.bindings) {
-    size_t h =
-        std::hash<uint32_t>{}(b.set) ^ (std::hash<uint32_t>{}(b.binding) << 1) ^
-        (std::hash<uint32_t>{}(static_cast<uint32_t>(b.type)) << 2) ^
-        (std::hash<uint32_t>{}(static_cast<uint32_t>(b.stageFlags)) << 3) ^
-        (std::hash<uint32_t>{}(b.descriptorCount) << 4);
-    res ^= h + 0x9e3779b9 + (res << 6) + (res >> 2);
+    size_t bindingHash = 0;
+    LX_core::hash_combine(bindingHash, b.set);
+    LX_core::hash_combine(bindingHash, b.binding);
+    LX_core::hash_combine(bindingHash, static_cast<uint32_t>(b.type));
+    LX_core::hash_combine(bindingHash, static_cast<uint32_t>(b.stageFlags));
+    LX_core::hash_combine(bindingHash, b.descriptorCount);
+    LX_core::hash_combine(res, bindingHash);
   }
   return res;
 }

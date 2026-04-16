@@ -1,47 +1,106 @@
-# 资产系统
+# 资产如何进入引擎
 
-这篇文档面向引擎使用者，解释“哪些资源可以被引擎加载”，以及这些资源如何进入运行时并最终参与渲染。
+这篇文档讨论的不是“文件系统长什么样”这么窄的问题，而是更前面的一层：我们怎样把磁盘上的模型、纹理、材质信息和骨骼资源带进运行时，并把它们接到 scene 与渲染路径里。
 
-## 你会在什么场景接触它
+对一个虽然小、但希望完整的渲染引擎来说，资产系统就是最靠前的一层入口。它回答的是三个连续的问题：
 
-你通常会在三种场景下直接碰到资产系统：
+- 资源在磁盘上以什么形式存在
+- loader 会把它们变成什么运行时对象
+- 这些对象最后如何进入 `SceneNode`、材质和 pipeline 链路
 
-- 准备测试或 demo 资源时，关心仓库里的 `assets/` 应该怎么组织。
-- 从文件加载模型、纹理或材质信息时，关心 loader 会产出什么运行时对象。
-- 把加载结果交给 `SceneNode`、`MaterialInstance` 或 shader 时，关心资源所有权和后续入口。
+## 从文件到运行时对象
 
-当前项目里，资产系统还不是一个统一的 `AssetManager`。它更像一组“运行时可加载资源 + 对应 loader 约定”的集合。
+当前项目里还没有一个统一的 `AssetManager`。所谓“资产系统”，更准确地说，是一组已经可以被引擎加载和消费的资源类型，以及围绕它们建立起来的 loader 约定。
 
-## 它负责什么
+现在最核心的资产有四类：
 
-这里的资产系统主要负责两件事：
+- 网格对象：`Mesh`、`VertexBuffer`、`IndexBuffer`
+- 纹理资源：image + sampler 的运行时包装
+- 材质相关资源：`MaterialTemplate`、`MaterialInstance` 以及 loader 产物
+- 骨骼资源：`Skeleton` 和 `SkeletonData`
 
-- 定义哪些内容算“引擎当前能消费的资源”，例如 mesh、texture、material、skeleton。
-- 提供把磁盘内容转换成运行时对象的入口，例如 mesh loader、texture loader、material loader。
+这些对象本身不是场景，也不会自己参与 draw。它们更像“被 scene 引用的原材料”。
 
-它不负责：
+## 这一层解决什么问题
 
-- 场景组织，这属于 [场景对象](../scene/index.md)。
-- pipeline 身份和构建，这属于 [渲染管线](../pipeline/index.md)。
-- backend 资源上传和 Vulkan 生命周期，这属于设计层文档。
+资产系统解决的是“怎么把磁盘上的内容稳定地带进引擎”这个问题。
 
-## 当前实现状态
+如果没有这一层，我们只能在代码里手写顶点数组、手动创建纹理、手动拼材质；这样做可以支撑最小 demo，但不足以支撑真正的引擎使用。
 
-- 已实现：`assets/` 目录约定和测试资产基线，见 [`REQ-010`](../../requirements/010-test-assets-and-layout.md)。
-- 已实现：OBJ / GLTF mesh loader、texture loading、`MaterialInstance` 运行时资源、`Skeleton` 资源入口已经存在。
-- 部分实现：GLTF 路径已经能承载 PBR 材质元数据，但距离“统一把 glTF 资产桥接成引擎内材质实例”还差一层收敛，见 [`REQ-011`](../../requirements/011-gltf-pbr-loader.md) 和 [`REQ-019`](../../requirements/019-demo-scene-viewer.md)。
-- 尚未实现：统一的“自定义材质模板加载契约”，当前仍以具体 loader 为主，见 [`REQ-025`](../../requirements/025-custom-material-template-and-loader.md)。
-- 尚未实现：IBL 环境贴图作为正式 scene-level 资产进入运行时，见 [`REQ-028`](../../requirements/028-ibl-environment-lighting.md)。
+有了这层之后，我们可以稳定地做几件事：
 
-## 与其他概念的关系
+- 准备 `assets/` 目录里的模型、纹理和测试资源
+- 用 loader 把它们转换成运行时对象
+- 把这些对象交给 [场景对象](../scene/index.md) 或 [材质系统](../material/index.md)
+- 再由 [渲染管线](../pipeline/index.md) 决定它们如何参与 pipeline 身份与构建
 
-- 和 [几何系统](../geometry/index.md)：mesh loader 的结果最终落到 `Mesh`、`VertexBuffer`、`IndexBuffer`。
-- 和 [材质系统](../material/index.md)：材质资产最终要么变成 `MaterialTemplate`，要么变成 `MaterialInstance`。
-- 和 [场景对象](../scene/index.md)：资产不会自己参与渲染，必须被场景对象引用后才进入 draw 路径。
-- 和 [渲染管线](../pipeline/index.md)：资产只提供输入，真正决定 pipeline 身份的是这些输入在 pass 维度上的组合方式。
+## 网格对象在这里扮演什么角色
 
-## 继续阅读
+如果只是想把一份几何数据变成可渲染输入，最终接触到的通常还是 `Mesh`。
 
-- 更底层的几何输入结构：[`../../subsystems/geometry.md`](../../subsystems/geometry.md)
-- 当前材质实现：[`../../subsystems/material-system.md`](../../subsystems/material-system.md)
-- 骨骼资源：[`../../subsystems/skeleton.md`](../../subsystems/skeleton.md)
+在这个项目里，`Mesh` 不是场景节点，而是一个很轻的几何资源对象。它主要做三件事：
+
+- 组合 `VertexBuffer` 和 `IndexBuffer`
+- 提供顶点布局、索引数、拓扑等查询接口
+- 通过 `getRenderSignature(pass)` 把几何结构贡献给 pipeline identity
+
+最直接的使用方式是：
+
+```cpp
+auto vb = VertexBuffer<VertexPos>::create({
+    {{0.0f, 0.0f, 0.0f}},
+    {{1.0f, 0.0f, 0.0f}},
+    {{0.0f, 1.0f, 0.0f}},
+});
+auto ib = IndexBuffer::create({0, 1, 2});
+auto mesh = Mesh::create(vb, ib);
+
+auto node = SceneNode::create("triangle", mesh, material, nullptr);
+```
+
+这里有一个很实用的边界：
+
+- `Mesh` 负责几何输入
+- `MaterialInstance` 负责 shader / pass / 参数
+- `SceneNode` 负责把它们组织成真正可参与渲染的对象
+
+## 材质、纹理和模型在入口上怎样汇合
+
+如果走的是更接近真实场景的路径，通常会先加载纹理，再用具体 loader 创建材质实例。
+
+例如当前比较成熟的入口是 `loadBlinnPhongMaterial()`。它会把 shader、pass、默认参数和纹理入口收敛成一个可直接挂到对象上的 `MaterialInstance`。
+
+OBJ / GLTF loader 也已经存在，因此我们不一定要自己手写顶点数组。当前这条模型资产路径的状态是：
+
+- OBJ 路径已经能稳定生成运行时 mesh
+- GLTF 路径已经能承载 PBR 相关元数据
+- 但“把 glTF 里的材质语义完整桥接成引擎内材质实例”还没有完全收口
+
+## 现在这套系统做到哪了
+
+可以把现状理解成三层：
+
+- 已实现：`assets/` 目录约定、测试资产基线、OBJ / GLTF mesh loader、texture loading、`Skeleton` 资源
+- 部分实现：GLTF 已经不只是几何输入，还带上了 PBR 材质元数据
+- 尚未实现：统一的材质模板加载契约，以及 IBL 资源作为正式资产接入 scene
+
+对应需求：
+
+- [`REQ-010`](../../requirements/010-test-assets-and-layout.md)：测试资产与 `assets/` 目录约定
+- [`REQ-011`](../../requirements/011-gltf-pbr-loader.md)：GLTF + PBR 元数据加载
+- [`REQ-025`](../../requirements/025-custom-material-template-and-loader.md)：自定义材质模板与模板 loader 契约
+- [`REQ-028`](../../requirements/028-ibl-environment-lighting.md)：IBL 环境光资源接入
+
+## 往实现层再走一步
+
+往下看时，当前实现大致是这样分的：
+
+- mesh / texture / skeleton 这些运行时资源在 `core` 层定义稳定类型
+- loader 主要在 `infra` 层，把磁盘格式转换成 `core` 层对象
+- scene 和 material 再去消费这些对象，形成真正的 draw 输入
+
+继续展开时，可以参考：
+
+- [`../../subsystems/geometry.md`](../../subsystems/geometry.md)
+- [`../../subsystems/material-system.md`](../../subsystems/material-system.md)
+- [`../../subsystems/skeleton.md`](../../subsystems/skeleton.md)

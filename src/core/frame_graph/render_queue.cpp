@@ -14,11 +14,10 @@ RenderingItem makeItemFromValidatedData(const ValidatedRenderablePassData &data)
   RenderingItem item;
   item.vertexBuffer = data.vertexBuffer;
   item.indexBuffer = data.indexBuffer;
-  item.objectInfo = data.objectInfo;
+  item.drawData = data.drawData;
   item.descriptorResources = data.descriptorResources;
   item.shaderInfo = data.shaderInfo;
   item.material = data.material;
-  item.passMask = data.passMask;
   item.pass = data.pass;
   item.pipelineKey = data.pipelineKey;
   return item;

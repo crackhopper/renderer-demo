@@ -17,13 +17,12 @@ struct RenderingItem {
   ShaderPtr shaderInfo;
   MaterialInstancePtr material; // 材质句柄 — 用于 PipelineBuildDesc::fromRenderingItem
 
-  ObjectPCPtr objectInfo;
+  PerDrawDataPtr drawData;
   IRenderResourcePtr vertexBuffer;
   IRenderResourcePtr indexBuffer;
 
   std::vector<IRenderResourcePtr> descriptorResources; // 材质 + skeleton 等资源
 
-  ResourcePassFlag passMask;
   StringID pass;
   PipelineKey pipelineKey;
 };
@@ -43,12 +42,11 @@ public:
     // multi-container fields. The seeded camera is created with a default
     // RenderTarget{} so tests that don't run through VulkanRenderer::initScene
     // still see a non-empty scene-level resource list.
-    auto cam = std::make_shared<Camera>(ResourcePassFlag::Forward);
+    auto cam = std::make_shared<Camera>();
     cam->setTarget(RenderTarget{});
     m_cameras.push_back(std::move(cam));
 
-    m_lights.push_back(
-        std::make_shared<DirectionalLight>(ResourcePassFlag::Forward));
+    m_lights.push_back(std::make_shared<DirectionalLight>());
   }
   ~Scene();
 
@@ -97,8 +95,9 @@ public:
   void revalidateNodesUsing(const MaterialInstancePtr &materialInstance);
 
   /// REQ-009 two-axis filter form: camera by matchesTarget(target), light by
-  /// supportsPass(pass). Returns camera UBOs first, then light UBOs; both in
-  /// their respective container insertion order. Empty return is valid.
+  /// supportsPass(pass). Returns camera data resources first, then light data
+  /// resources; both in their respective container insertion order. Empty
+  /// return is valid.
   std::vector<IRenderResourcePtr>
   getSceneLevelResources(StringID pass, const RenderTarget &target) const;
 

@@ -18,9 +18,9 @@
 
 - `Scene`：持有 renderables、camera 列表、light 列表，要求显式 `sceneName`。
 - `IRenderable`：renderable 抽象接口，新增 `getValidatedPassData(pass)` 只读出口。
-- `SceneNode`：当前主路径实现，聚合 `nodeName`、`MeshPtr`、`MaterialInstancePtr`、可选 `SkeletonPtr` 与 `ObjectPCPtr`。
+- `SceneNode`：当前主路径实现，聚合 `nodeName`、`MeshPtr`、`MaterialInstancePtr`、可选 `SkeletonPtr` 与 `PerDrawDataPtr`。
 - `ValidatedRenderablePassData`：`pass -> validated entry` 缓存项，保存 queue 需要的稳定结构结果。
-- `RenderingItem`：一次 draw 的完整上下文，字段仍是 `shaderInfo`、`material`、`objectInfo`、`vertexBuffer`、`indexBuffer`、`descriptorResources`、`passMask`、`pass`、`pipelineKey`。
+- `RenderingItem`：一次 draw 的完整上下文，字段仍是 `shaderInfo`、`material`、`drawData`、`vertexBuffer`、`indexBuffer`、`descriptorResources`、`pass`、`pipelineKey`。
 - `RenderableSubMesh`：仍保留的兼容实现，但不再是推荐的场景主模型。
 
 ## 典型数据流
@@ -35,8 +35,8 @@
 ## 关键约束
 
 - `SceneNode` 可以脱离 `Scene` 独立存在；scene 只额外提供命名空间和 scene-level 资源。
-- `SceneNode` 的结构必填项是 `nodeName`、`mesh`、`materialInstance`；`skeleton` 可选；`objectPC` 继续保留。
-- `setMesh(...)`、`setMaterialInstance(...)`、`setSkeleton(...)` 会同步重建 validated cache；`setFloat` / `setTexture` / `updateUBO()` / model 更新不会。
+- `SceneNode` 的结构必填项是 `nodeName`、`mesh`、`materialInstance`；`skeleton` 可选；`perDrawData` 继续保留。
+- `setMesh(...)`、`setMaterialInstance(...)`、`setSkeleton(...)` 会同步重建 validated cache；`setFloat` / `setTexture` / `syncGpuData()` / model 更新不会。
 - `supportsPass(pass)` 现在是缓存查询，不再是简单的 pass-mask 按位判断。
 - 共享 `MaterialInstance` 的 `setPassEnabled(...)` 会由 `Scene::revalidateNodesUsing(materialInstance)` 传播到所有引用该实例的节点；普通参数写入不触发这条结构性重验证。
 - 结构性校验失败统一走 `FATAL + terminate`，错误信息会带 pass、material、shader variants 和 vertex layout。
@@ -52,7 +52,7 @@
 
 - `SceneNode::getDescriptorResources()` 和 `getShaderInfo()` 的无参版本仍以 `Pass_Forward` 作为默认读取路径，主要是兼容旧接口。
 - `RenderableSubMesh` 仍能工作，但它的 validated 数据是兼容层即时拼出来的，不具备 `SceneNode` 那套自维护缓存和 fatal 校验模型。
-- `ObjectPC` 仍是 128 字节缓冲，但当前 engine-wide ABI 只要求 `PC_Base` / `PC_Draw` 的 `model` 字段有效。
+- `PerDrawData` 仍是 128 字节缓冲，但当前 engine-wide ABI 只要求 `PerDrawLayoutBase` / `PerDrawLayout` 的 `model` 字段有效。
 - `Scene` 构造时仍会补一个默认 camera 和一个默认 directional light，方便不走完整 renderer 初始化的测试；节点一旦通过 `addRenderable()` 挂进 scene，也会被写入 `Scene*` 反向指针以支持 shared material 重验证传播。
 - `src/core/scene/object.cpp` 里的 fatal 文本现在会直接带上缺失的 input 名字，例如 `missing vertex input 'inUV' at location 2`，便于把 forward variant 失败定位到具体 mesh contract。
 - `src/test/integration/test_scene_node_validation.cpp` 已经把 `missing inColor / inUV / inNormal / inTangent / inBoneIDs / inBoneWeights / Skeleton` 这些 forward-path 失败都跑成子进程死亡测试。
