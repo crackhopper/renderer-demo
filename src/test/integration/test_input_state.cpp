@@ -1,5 +1,6 @@
 #include "core/input/dummy_input_state.hpp"
 #include "core/input/key_code.hpp"
+#include "core/input/mock_input_state.hpp"
 #include "core/input/mouse_button.hpp"
 
 #include <iostream>
@@ -65,6 +66,18 @@ void testEnumBoundaries() {
   EXPECT(static_cast<uint16_t>(KeyCode::Unknown) == 0, "KeyCode::Unknown must be 0");
 }
 
+void testMockInputStateGuardsSentinels() {
+  MockInputState input;
+
+  input.setKeyDown(KeyCode::Count, true);
+  input.setMouseButtonDown(MouseButton::Count, true);
+
+  EXPECT(!input.isKeyDown(KeyCode::Count),
+         "MockInputState must ignore KeyCode::Count sentinel");
+  EXPECT(!input.isMouseButtonDown(MouseButton::Count),
+         "MockInputState must ignore MouseButton::Count sentinel");
+}
+
 } // namespace
 
 int main() {
@@ -75,6 +88,7 @@ int main() {
   testDummyWheelDelta();
   testDummyNextFrame();
   testEnumBoundaries();
+  testMockInputStateGuardsSentinels();
 
   if (failures == 0) {
     std::cout << "[PASS] All input state tests passed.\n";

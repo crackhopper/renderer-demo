@@ -12,9 +12,12 @@
 // 窗口系统
 #include "infra/window/window.hpp"
 #include "infra/material_loader/generic_material_loader.hpp"
+#include "core/scene/orbit_camera_controller.hpp"
+#include "core/scene/freefly_camera_controller.hpp"
 #include "core/utils/filesystem_tools.hpp"
 
 #include <array>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
@@ -30,6 +33,39 @@ bool testDebugEnabled() {
     return value != nullptr && std::strcmp(value, "0") != 0;
   }();
   return enabled;
+}
+
+float clampUnit(float value) {
+  if (value < -1.0f) {
+    return -1.0f;
+  }
+  if (value > 1.0f) {
+    return 1.0f;
+  }
+  return value;
+}
+
+void syncFreeFlyFromCamera(FreeFlyCameraController &controller,
+                           const Camera &camera) {
+  const Vec3f forward = (camera.target - camera.position).normalized();
+  controller.setPosition(camera.position);
+  controller.setYawDeg(std::atan2(forward.x, forward.z) * 180.0f /
+                       3.14159265358979323846f);
+  controller.setPitchDeg(std::asin(clampUnit(forward.y)) * 180.0f /
+                         3.14159265358979323846f);
+}
+
+void syncOrbitFromCamera(OrbitCameraController &controller, const Camera &camera) {
+  const Vec3f offset = camera.position - camera.target;
+  const float distance = offset.length();
+  controller.setTarget(camera.target);
+  if (distance > 1e-6f) {
+    controller.setDistance(distance);
+    controller.setYawDeg(std::atan2(offset.x, offset.z) * 180.0f /
+                         3.14159265358979323846f);
+    controller.setPitchDeg(std::asin(clampUnit(offset.y / distance)) * 180.0f /
+                           3.14159265358979323846f);
+  }
 }
 } // namespace
 
@@ -92,18 +128,42 @@ int main() {
               << std::endl;
   }
 
+  auto input = window->getInputState();
+  OrbitCameraController orbitCtrl({0, 0, 0}, 3.0f, 0.0f, 0.0f);
+  FreeFlyCameraController freeflyCtrl({0, 0, 3}, 180.0f, 0.0f);
+  bool useOrbit = true;
+  bool tabWasDown = false;
+
   EngineLoop loop;
   loop.initialize(window, renderer);
   loop.startScene(scene);
 
   uint64_t frameCounter = 0;
-  loop.setUpdateHook([&](Scene &, const Clock &) {
-    camera->position = {0.0f, 0.0f, 3.0f};
-    camera->target = {0.0f, 0.0f, 0.0f};
-    camera->up = Vec3f(0.0f, 1.0f, 0.0f);
-    camera->aspect = 800.0f / 600.0f;
+  loop.setUpdateHook([&](Scene &, const Clock &clock) {
+    // Tab key edge detection: toggle on press
+    bool tabDown = input->isKeyDown(KeyCode::Tab);
+    if (tabDown && !tabWasDown) {
+      if (useOrbit) {
+        syncFreeFlyFromCamera(freeflyCtrl, *camera);
+      } else {
+        syncOrbitFromCamera(orbitCtrl, *camera);
+      }
+      useOrbit = !useOrbit;
+      if (testDebugEnabled()) {
+        std::cerr << "[TriangleTest] switched to "
+                  << (useOrbit ? "Orbit" : "FreeFly") << " camera\n";
+      }
+    }
+    tabWasDown = tabDown;
 
+    camera->aspect = 800.0f / 600.0f;
+    if (useOrbit) {
+      orbitCtrl.update(*camera, *input, clock.deltaTime());
+    } else {
+      freeflyCtrl.update(*camera, *input, clock.deltaTime());
+    }
     camera->updateMatrices();
+    input->nextFrame();
     if (testDebugEnabled() && frameCounter < 3) {
       std::cerr << "[TriangleTest] frame=" << frameCounter << ", cameraPos=("
                 << camera->position.x << "," << camera->position.y << ","

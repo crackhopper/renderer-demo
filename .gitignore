@@ -1,5 +1,6 @@
 # Build output
 build/
+build-*/
 
 # External: ignore docs, examples, tests
 external/**/docs/

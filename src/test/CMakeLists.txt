@@ -22,6 +22,8 @@ set(TEST_INTEGRATION_EXE_LIST
   test_input_state
   test_clock
   test_sdl_input
+  test_orbit_camera_controller
+  test_freefly_camera_controller
 
   # test_render_sphere
   # test_render_model
