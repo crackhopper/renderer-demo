@@ -113,7 +113,7 @@ buildInstanceFromBlinnPhong(ResourcePassFlag flag = ResourcePassFlag::Forward) {
   ShaderProgramSet set;
   set.shaderName = "blinnphong_0";
   set.shader = shader;
-  RenderPassEntry entry;
+  MaterialPassDefinition entry;
   entry.shaderSet = set;
   entry.renderState = RenderState{};
   entry.buildCache();
@@ -139,7 +139,7 @@ MaterialTemplate::Ptr buildMultiPassTemplate(const RenderState &forwardState,
   ShaderProgramSet forwardSet;
   forwardSet.shaderName = "fake_forward";
   forwardSet.shader = shader;
-  RenderPassEntry forwardEntry;
+  MaterialPassDefinition forwardEntry;
   forwardEntry.shaderSet = forwardSet;
   forwardEntry.renderState = forwardState;
   tmpl->setPass(Pass_Forward, std::move(forwardEntry));
@@ -147,7 +147,7 @@ MaterialTemplate::Ptr buildMultiPassTemplate(const RenderState &forwardState,
   ShaderProgramSet shadowSet;
   shadowSet.shaderName = "fake_shadow";
   shadowSet.shader = shader;
-  RenderPassEntry shadowEntry;
+  MaterialPassDefinition shadowEntry;
   shadowEntry.shaderSet = shadowSet;
   shadowEntry.renderState = shadowState;
   tmpl->setPass(Pass_Shadow, std::move(shadowEntry));

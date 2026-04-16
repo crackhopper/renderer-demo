@@ -70,38 +70,6 @@ private:
   std::vector<ShaderStageCode> m_stages;
 };
 
-class FakeMaterial : public IMaterial {
-public:
-  FakeMaterial(MaterialTemplate::Ptr tmpl) : m_template(std::move(tmpl)) {}
-
-  std::vector<IRenderResourcePtr> getDescriptorResources() const override {
-    return {};
-  }
-  IShaderPtr getShaderInfo() const override {
-    return m_template ? m_template->getShader() : nullptr;
-  }
-  ResourcePassFlag getPassFlag() const override {
-    return ResourcePassFlag::Forward;
-  }
-  RenderState getRenderState(StringID pass) const override {
-    (void)pass;
-    RenderState s;
-    s.cullMode = CullMode::Front;
-    s.depthTestEnable = false;
-    return s;
-  }
-
-  StringID getRenderSignature(StringID pass) const override {
-    StringID passSig =
-        m_template ? m_template->getRenderPassSignature(pass) : StringID{};
-    StringID fields[] = {passSig};
-    return GlobalStringTable::get().compose(TypeTag::MaterialRender, fields);
-  }
-
-private:
-  MaterialTemplate::Ptr m_template;
-};
-
 RenderingItem
 buildItem(PrimitiveTopology topo = PrimitiveTopology::TriangleList) {
   std::vector<ShaderResourceBinding> bindings = {
@@ -146,12 +114,13 @@ buildItem(PrimitiveTopology topo = PrimitiveTopology::TriangleList) {
 
   ShaderProgramSet set;
   set.shaderName = "fake_shader";
-  RenderPassEntry entry;
+  MaterialPassDefinition entry;
   entry.shaderSet = set;
   entry.renderState = RenderState{};
+  entry.renderState.cullMode = CullMode::Front;
+  entry.renderState.depthTestEnable = false;
   tmpl->setPass(Pass_Forward, std::move(entry));
-
-  auto material = std::make_shared<FakeMaterial>(tmpl);
+  auto material = MaterialInstance::create(tmpl);
 
   // Minimal vertex + index buffers.
   auto vb = VertexBuffer<VertexPos>::create(
@@ -204,7 +173,7 @@ void testFromRenderingItemTopology() {
 void testFromRenderingItemRenderStateFromMaterial() {
   auto item = buildItem();
   auto info = PipelineBuildDesc::fromRenderingItem(item);
-  // FakeMaterial returns CullFront + depthTest disabled
+  // MaterialInstance resolves render state from the template's pass definition.
   EXPECT(info.renderState.cullMode == CullMode::Front,
          "renderState cull comes from material");
   EXPECT(info.renderState.depthTestEnable == false,

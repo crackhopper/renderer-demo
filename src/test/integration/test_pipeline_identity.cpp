@@ -61,42 +61,13 @@ private:
   std::vector<ShaderResourceBinding> m_bindings;
 };
 
-class FakeMaterial : public IMaterial {
-public:
-  FakeMaterial(MaterialTemplate::Ptr tmpl) : m_template(std::move(tmpl)) {}
-
-  std::vector<IRenderResourcePtr> getDescriptorResources() const override {
-    return {};
-  }
-  IShaderPtr getShaderInfo() const override {
-    return m_template ? m_template->getShader() : nullptr;
-  }
-  ResourcePassFlag getPassFlag() const override {
-    return ResourcePassFlag::Forward;
-  }
-  RenderState getRenderState(StringID pass) const override {
-    (void)pass;
-    return {};
-  }
-
-  StringID getRenderSignature(StringID pass) const override {
-    StringID passSig =
-        m_template ? m_template->getRenderPassSignature(pass) : StringID{};
-    StringID fields[] = {passSig};
-    return GlobalStringTable::get().compose(TypeTag::MaterialRender, fields);
-  }
-
-private:
-  MaterialTemplate::Ptr m_template;
-};
-
 // Reusable vertex + index + shader builders.
 struct Fixture {
   VertexBufferPtr vb;
   std::shared_ptr<IndexBuffer> ib;
   MeshPtr mesh;
   MaterialTemplate::Ptr tmpl;
-  std::shared_ptr<FakeMaterial> material;
+  MaterialInstance::Ptr material;
 
   static Fixture
   make(const std::string &shaderName = "blinnphong_0",
@@ -116,11 +87,11 @@ struct Fixture {
     ps.shaderName = shaderName;
     ps.variants = variants;
 
-    RenderPassEntry entry;
+    MaterialPassDefinition entry;
     entry.shaderSet = ps;
     entry.renderState = state;
     f.tmpl->setPass(Pass_Forward, std::move(entry));
-    f.material = std::make_shared<FakeMaterial>(f.tmpl);
+    f.material = MaterialInstance::create(f.tmpl);
     return f;
   }
 };
@@ -184,7 +155,7 @@ void testDifferentPassProducesDifferentKey() {
   RenderState shadowState;
   shadowState.cullMode = CullMode::Front; // flip to make signature differ
 
-  RenderPassEntry shadowEntry;
+  MaterialPassDefinition shadowEntry;
   shadowEntry.shaderSet = ps;
   shadowEntry.renderState = shadowState;
   f.tmpl->setPass(Pass_Shadow, std::move(shadowEntry));

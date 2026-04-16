@@ -131,7 +131,7 @@ loadBlinnPhongMaterial(LX_core::ResourcePassFlag passFlag,
   programSet.variants = variants;
   programSet.shader = shader;
 
-  LX_core::RenderPassEntry entry;
+  LX_core::MaterialPassDefinition entry;
   entry.shaderSet = programSet;
   entry.renderState = LX_core::RenderState{};
   entry.buildCache(); // populates per-entry bindingCache for backend lookups

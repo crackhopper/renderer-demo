@@ -10,7 +10,7 @@ PBR 版最少要完成四件事：
 
 1. 定位 `shaders/glsl/pbr.vert` / `pbr.frag`
 2. 调 `ShaderCompiler::compileProgram(...)` + `ShaderReflector`
-3. 构造 `MaterialTemplate` / `RenderPassEntry` / `MaterialInstance`
+3. 构造 `MaterialTemplate` / `MaterialPassDefinition` / `MaterialInstance`
 4. 给 `MaterialUBO` 和纹理绑定种子默认值
 
 ## 文件位置
@@ -26,7 +26,7 @@ src/infra/material_loader/pbr_material_loader.cpp
 ```cpp
 // src/infra/material_loader/pbr_material_loader.hpp
 #pragma once
-#include "core/asset/material.hpp"
+#include "core/asset/material_instance.hpp"
 #include "core/frame_graph/pass.hpp"
 
 namespace LX_infra {
@@ -100,7 +100,7 @@ loadPbrMaterial(LX_core::ResourcePassFlag passFlag) {
     programSet.shaderName = baseName;
     programSet.shader = shader;
 
-    LX_core::RenderPassEntry entry;
+    LX_core::MaterialPassDefinition entry;
     entry.shaderSet = programSet;
     entry.renderState = LX_core::RenderState{};
     entry.buildCache();
@@ -131,7 +131,7 @@ loadPbrMaterial(LX_core::ResourcePassFlag passFlag) {
 | GLSL → SPIR-V | `ShaderCompiler` | 运行期编译让我们改 shader 不用重启构建 |
 | SPIR-V → ShaderResourceBinding | `ShaderReflector` | 反射驱动的材质绑定，不用手写 set/binding 表 |
 | `CompiledShader` 包装 | `src/infra/shader_compiler/compiled_shader.hpp` | 把 bytecode + bindings 封成 `IShader` |
-| `MaterialTemplate::create` | `core/asset/material.hpp` | 蓝图：一个材质模板可以实例化多次 |
+| `MaterialTemplate::create` | `core/asset/material_template.hpp` | 蓝图：一个材质模板可以实例化多次 |
 | `setPass(Pass_Forward, entry)` | 同上 | 某个 pass 下用哪套 shader + render state |
 | `buildBindingCache()` | 同上 | 把反射结果做成 `StringID -> ShaderResourceBinding` 查表 |
 | `MaterialInstance::create` | 同上 | 真正分配 std140 字节 buffer 的 owner |

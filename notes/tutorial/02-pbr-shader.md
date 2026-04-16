@@ -28,7 +28,7 @@ shaders/glsl/pbr.frag
 
 - `src/core/rhi/render_resource.hpp` 中的 `PC_Draw = PC_Base`
 - `src/core/scene/camera.hpp` 中 `CameraUBO::getBindingName()`
-- `src/core/asset/material.cpp` / `material.hpp` 中 `MaterialUBO` 约定
+- `src/core/asset/material_instance.cpp` / `material_instance.hpp` 中 `MaterialUBO` 约定
 - `src/core/scene/light.hpp` 中 `DirectionalLightUBO::getBindingName()`
 
 换句话说，当前 PBR shader 的问题已经不是“接口名不对”，而是“还没被 loader / example 接起来”。
@@ -236,7 +236,7 @@ void main() {
 
 - `CameraUBO` — 见 `src/core/scene/camera.hpp:32`，`getBindingName()` 返回 `"CameraUBO"`
 - `LightUBO` — 见 `src/core/scene/light.hpp:58`，`getBindingName()` 返回 `"LightUBO"`
-- `MaterialUBO` — 见 `src/core/asset/material.hpp` / `src/core/asset/material.cpp`
+- `MaterialUBO` — 见 `src/core/asset/material_instance.hpp` / `src/core/asset/material_instance.cpp`
 
 UBO 这一层名字不能变；纹理这一层名字也最好直接沿用 shader 里的 `albedoMap` / `normalMap` / `metallicRoughnessMap`，这样最省事。
 

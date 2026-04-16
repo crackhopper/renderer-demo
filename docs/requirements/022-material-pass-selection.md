@@ -4,7 +4,7 @@
 
 当前材质系统的 pass 职责分布并不对称：
 
-- `MaterialTemplate` 已经通过 `m_passes: unordered_map<StringID, RenderPassEntry>` 表达“这个材质蓝图有哪些 pass，每个 pass 用什么 shader + render state”
+- `MaterialTemplate` 已经通过 `m_passes: unordered_map<StringID, MaterialPassDefinition>` 表达“这个材质蓝图有哪些 pass，每个 pass 用什么 shader + render state”
 - `MaterialInstance` 内部持有 `MaterialTemplate`
 - 但 `MaterialInstance` 只有一个整体 `ResourcePassFlag m_passFlag`，它只能粗粒度表达“这个材质实例参与哪些 pass mask”
 
@@ -37,7 +37,7 @@
 `MaterialTemplate` 负责定义：
 
 - 有哪些 pass
-- 每个 pass 的 `RenderPassEntry`
+- 每个 pass 的 `MaterialPassDefinition`
 - 对应的 shader program / variants / render state
 
 这是材质蓝图的一部分，应该由 loader 一次性构造完成。
@@ -62,7 +62,7 @@
 
 当前 `MaterialInstance::m_passFlag` 是一个整体 bitmask。它能做粗粒度过滤，但不足以表达完整材质 pass 语义，因为：
 
-- 它不能验证模板里是否真的存在对应 `RenderPassEntry`
+- 它不能验证模板里是否真的存在对应 `MaterialPassDefinition`
 - 它没有清晰回答“instance 关闭了某个模板 pass”这件事
 - 它和 `StringID pass` 驱动的 render signature / frame graph pass 常量并不完全同构
 
@@ -126,7 +126,7 @@
 
 ### R1: `MaterialTemplate` 是 pass 蓝图所有者
 
-- `MaterialTemplate` 继续持有 pass → `RenderPassEntry` 映射
+- `MaterialTemplate` 继续持有 pass → `MaterialPassDefinition` 映射
 - loader 负责创建完整的 pass 蓝图
 - 任意 pass-specific shader / variant / render state 只在 template 上定义
 
@@ -235,7 +235,7 @@
 
 - `docs/design/MaterialSystem.md`：level-1 总览页
 - `notes/subsystems/material-system.md`：当前实现说明
-- 若 `IMaterial` / `IRenderable::supportsPass` 语义变化明显，补充更新术语表与相关架构文档
+- 若材质类型 / `IRenderable::supportsPass` 语义变化明显，补充更新术语表与相关架构文档
 
 ## 当前实现事实
 
@@ -263,3 +263,32 @@
 - `RenderQueue` pass 过滤路径
 - 材质 loader
 - 材质系统相关文档
+
+## 2026-04-16 核查结果
+
+### 需求核对
+
+| Requirement | Status | Notes |
+|-------------|--------|-------|
+| R1 | 已实现 | `MaterialTemplate` 继续持有 `pass -> MaterialPassDefinition` 映射 |
+| R2 | 已实现 | `MaterialInstance` 提供 `isPassEnabled` / `setPassEnabled` / `getEnabledPasses`，未定义 pass 走 `FATAL + terminate` |
+| R3 | 已实现 | `getPassFlag()` 由“已定义且已启用”的 pass 集合推导 |
+| R4 | 已实现 | 材质查询面已收敛到 `MaterialInstance::getRenderState(pass)`，删除 Forward-only 兼容语义 |
+| R5 | 已实现 | `SceneNode::supportsPass(pass)` 同时受 instance enable 状态和 validated cache 约束 |
+| R6 | 已实现 | `SceneNode::rebuildValidatedCache()` 覆盖所有已启用 pass |
+| R7 | 已实现 | 普通材质参数写入不触发 pass-state listener |
+| R8 | 已实现 | `Scene::revalidateNodesUsing(materialInstance)` 负责共享实例传播 |
+| R9 | 已实现 | `MaterialTemplate` 仍按静态蓝图处理 |
+| R10 | 已实现 | loader 继续负责构造完整 template；当前 `blinnphong` loader 只产出 Forward pass |
+| R11 | 已实现 | `docs/design/MaterialSystem.md` 与 `notes/subsystems/material-system.md` 已同步当前模型 |
+
+### 本次补齐
+
+- 删除无参 `getRenderState()` 的 Forward-only 兼容入口，避免继续保留旧语义。
+- 把空 template 下的 `MaterialInstance::getPassFlag()` 收敛为“空 pass 集合”而不是默认 `Forward`。
+- 同步 level-1 材质文档的实现状态描述，移除已过时的“SceneNode 校验尚未完整建立”说法。
+
+### 验证建议
+
+- `test_material_instance`
+- `test_scene_node_validation`

@@ -1,5 +1,5 @@
 #pragma once
-#include "core/asset/material.hpp"
+#include "core/asset/material_instance.hpp"
 
 namespace LX_infra {
 

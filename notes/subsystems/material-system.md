@@ -13,8 +13,8 @@
 ## 核心对象
 
 - `MaterialTemplate`：定义某个材质有哪些 pass、每个 pass 用什么 shader、variants 和 render state。
-- `MaterialInstance`：持有运行期参数，是 `IMaterial` 的唯一实现。
-- `RenderPassEntry`：单个 pass 的 shader 配置和 render state。
+- `MaterialInstance`：持有运行期参数，是当前唯一的材质类型。
+- `MaterialPassDefinition`：单个 pass 的 shader 配置和 render state。
 - `UboByteBufferResource`：把材质内部的 UBO byte buffer 暴露给 backend。
 
 ## 典型数据流
@@ -41,10 +41,10 @@
 
 ## 当前实现边界
 
-- `MaterialTemplate` 仍保留 `RenderPassEntry::bindingCache` 这条旧路径，但运行时主路径主要依赖 template 级 `m_bindingCache`。
+- `MaterialTemplate` 仍保留 `MaterialPassDefinition::bindingCache` 这条旧路径，但运行时主路径主要依赖 template 级 `m_bindingCache`。
 - 旧的 `MaterialInstance::create(template, passFlag)` 入参现在只保留兼容外形；当前实现不会用它裁剪初始 enabled pass 集，真正的 truth 是 template 定义 + 后续 `setPassEnabled(...)` 结果。
 - 若 enabled passes 没有任何 `MaterialUBO`，实例会回退到 template shader 查找布局。
-- `src/infra/material_loader/blinn_phong_material_loader.cpp` 里的 forward loader 会先规范化 variant 子集，再把同一组 enabled variants 同时写进 shader 编译输入和 `RenderPassEntry::shaderSet.variants`。
+- `src/infra/material_loader/blinn_phong_material_loader.cpp` 里的 forward loader 会先规范化 variant 子集，再把同一组 enabled variants 同时写进 shader 编译输入和 `MaterialPassDefinition::shaderSet.variants`。
 - 这个 loader 只校验“variant 组合是否合法”，不会提前看 mesh/skeleton；资源层匹配交给 `SceneNode` 在结构校验阶段处理。
 - 共享 `MaterialInstance` 的 pass enable 改动属于结构性变化；`Scene` 会调用 `revalidateNodesUsing(materialInstance)` 传播到所有引用它的 `SceneNode`。普通 `setFloat` / `setTexture` / `updateUBO` 不会走这条传播链。
 
@@ -52,7 +52,7 @@
 
 - 想加新材质参数：看 shader 反射和 `MaterialInstance` setter 路径。
 - 想改 `blinnphong_0` 的变体规则：先看 `src/infra/material_loader/blinn_phong_material_loader.cpp`，再看 `shaders/glsl/blinnphong_0.vert` / `blinnphong_0.frag`。
-- 想改 variant 身份：看 `ShaderProgramSet`、loader 和 `RenderPassEntry`。
+- 想改 variant 身份：看 `ShaderProgramSet`、loader 和 `MaterialPassDefinition`。
 - 想改 pass enable 对 scene 的影响：看 `MaterialInstance::setPassEnabled()`、`Scene::revalidateNodesUsing(...)` 和 `SceneNode` 的 validated cache。
 
 ## 关联文档

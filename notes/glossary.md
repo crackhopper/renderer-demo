@@ -29,11 +29,6 @@ Camera 的 GPU 端数据（view/proj 矩阵 + eye 位置）。由 `Camera::getUB
 单例字符串驻留表。提供字符串 ↔ `uint32_t` ID 的双向映射，以及结构化 `compose` / `decompose`。
 → `src/core/utils/string_table.hpp:44`
 
-### `IMaterial`
-
-材质的抽象接口。唯一实现是 `MaterialInstance`。
-→ `src/core/asset/material.hpp:145`
-
 ### `IRenderable`
 
 场景对象的抽象接口。除了 buffer / descriptor / signature 访问，还提供 `supportsPass(pass)` 和 `getValidatedPassData(pass)`。
@@ -51,13 +46,13 @@ Shader 的抽象接口。提供 stage、descriptor reflection、vertex input ref
 
 ### `MaterialInstance`
 
-唯一的 `IMaterial` 实现。基于 shader 反射自动分配 std140 字节 buffer，并维护 pass enable 状态与 pass-state listeners。
-→ `src/core/asset/material.hpp:285`
+当前唯一的材质类型。基于 shader 反射自动分配 std140 字节 buffer，并维护 pass enable 状态与 pass-state listeners。
+→ `src/core/asset/material_instance.hpp`
 
 ### `MaterialTemplate`
 
-材质蓝图。持有 template shader、每个 pass 的 `RenderPassEntry`，以及 template 级 binding cache。
-→ `src/core/asset/material.hpp:159`
+材质蓝图。持有 template shader、每个 pass 的 `MaterialPassDefinition`，以及 template 级 binding cache。
+→ `src/core/asset/material_template.hpp`
 
 ### `ObjectPC`
 
@@ -84,10 +79,10 @@ backend 构建 pipeline 所需的完整输入包，通过 `fromRenderingItem(ite
 pipeline 的结构化身份，底层是一个 `StringID`，由 object/material 两侧 render signature compose 而成。
 → `src/core/pipeline/pipeline_key.hpp:11`
 
-### `RenderPassEntry`
+### `MaterialPassDefinition`
 
 `MaterialTemplate` 每个 pass 的配置：`renderState` + `shaderSet` + 过渡性的 per-pass binding cache。
-→ `src/core/asset/material.hpp:102`
+→ `src/core/asset/material_pass_definition.hpp`
 
 ### `RenderingItem`
 
@@ -132,7 +127,7 @@ SPIR-V 反射出的 descriptor binding 描述，包含名字、set/binding、类
 ### `UboByteBufferResource`
 
 `IRenderResource` 的一个实现，对 `std::vector<uint8_t>` 做非拥有包装，供 `MaterialInstance` 暴露 UBO 数据。
-→ `src/core/asset/material.hpp:259`
+→ `src/core/asset/material_instance.hpp`
 
 ### `ValidatedRenderablePassData`
 

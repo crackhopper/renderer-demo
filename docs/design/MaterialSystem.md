@@ -133,11 +133,11 @@ variants 属于 shader/program 形态，因此归属 `MaterialTemplate`，不归
 - 实例参数写入已经走 shader 反射
 - `MaterialInstance::getPassFlag()` 已从“template 已定义且 instance 已启用”的 pass 集合派生
 - `getRenderState(pass)` 已改成 pass-aware 查询
+- `SceneNode` 会对所有已启用 pass 做结构校验，并把通过校验的结果缓存成 `ValidatedRenderablePassData`
 
 仍处于过渡中的部分有：
 
 - 旧 `IRenderable` 接口过于贴近底层资源展开
-- vertex input 反射与 SceneNode 级合法性校验还未完整建立
 - `MaterialTemplate` 仍被当作静态蓝图，不支持运行时结构性热修改
 
 ## 推荐阅读顺序

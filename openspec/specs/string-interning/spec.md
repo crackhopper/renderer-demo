@@ -82,7 +82,7 @@ A free function `MakeStringID(const std::string&)` SHALL be provided as a conven
 - **THEN** `"u_Time"` is implicitly converted to `StringID` and the value is stored under that ID
 
 ### Requirement: TypeTag enumerates structured StringID categories
-`GlobalStringTable` SHALL provide a `TypeTag` enum (`uint8_t` backing) that distinguishes leaf strings from each category of structured StringID. The enum MUST include at minimum `String`, `ShaderProgram`, `RenderState`, `VertexLayoutItem`, `VertexLayout`, `MeshRender`, `Skeleton`, `RenderPassEntry`, `MaterialRender`, `ObjectRender`, and `PipelineKey`. Leaf strings interned via `Intern` or `getOrCreateID` MUST be tagged as `TypeTag::String`. Topology and similar small leaves SHALL remain plain strings and MUST NOT be represented as a separate `TypeTag`.
+`GlobalStringTable` SHALL provide a `TypeTag` enum (`uint8_t` backing) that distinguishes leaf strings from each category of structured StringID. The enum MUST include at minimum `String`, `ShaderProgram`, `RenderState`, `VertexLayoutItem`, `VertexLayout`, `MeshRender`, `Skeleton`, `MaterialPassDefinition`, `MaterialRender`, `ObjectRender`, and `PipelineKey`. Leaf strings interned via `Intern` or `getOrCreateID` MUST be tagged as `TypeTag::String`. Topology and similar small leaves SHALL remain plain strings and MUST NOT be represented as a separate `TypeTag`.
 
 #### Scenario: Leaf string has String tag
 - **WHEN** `Intern("tri")` is called and the result is passed to `decompose`

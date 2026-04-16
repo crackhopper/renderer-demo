@@ -50,7 +50,7 @@
 - 和 `Light` / `Camera`：`MaterialInstance` 自己只提供材质拥有的资源；`CameraUBO`、`LightUBO` 属于 scene-level 资源，由 `Scene` 追加。
 - 和 loader：当前最成熟的材质入口是 [blinn_phong_material_loader.cpp](/home/lx/proj/renderer-demo/src/infra/material_loader/blinn_phong_material_loader.cpp:77)，它会规范化 variants、编译 `blinnphong_0`、创建 template，再返回已写入默认参数的 `MaterialInstance`。
 
-如果你想看更偏实现的分层细节，直接读 [`../subsystems/material-system.md`](../subsystems/material-system.md)。
+如果你想看更偏实现的分层细节，直接读 [`../../subsystems/material-system.md`](../../subsystems/material-system.md)。
 
 ## 示例代码
 

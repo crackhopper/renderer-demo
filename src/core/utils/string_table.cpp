@@ -24,8 +24,8 @@ std::string_view tagName(TypeTag tag) {
     return "MeshRender";
   case TypeTag::Skeleton:
     return "Skeleton";
-  case TypeTag::RenderPassEntry:
-    return "RenderPassEntry";
+  case TypeTag::MaterialPassDefinition:
+    return "MaterialPassDefinition";
   case TypeTag::MaterialRender:
     return "MaterialRender";
   case TypeTag::ObjectRender:

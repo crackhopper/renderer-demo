@@ -52,7 +52,7 @@
 - 和 `SceneNode`：`SceneNode` 会拿 mesh 的 `VertexLayout` 去对照 shader reflection 做顶点输入校验。
 - 和 `RenderQueue` / backend：后续并不会重新读一个“高层 mesh 对象接口”来建 pipeline，而是直接从 `RenderingItem` 里的 vertex/index buffer 取布局和 topology。
 
-如果你关心更底层的几何抽象和 signature 组成，继续看 [`../subsystems/geometry.md`](../subsystems/geometry.md)。
+如果你关心更底层的几何抽象和 signature 组成，继续看 [`../../subsystems/geometry.md`](../../subsystems/geometry.md)。
 
 ## 示例代码
 

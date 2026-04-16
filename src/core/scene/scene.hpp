@@ -15,7 +15,7 @@ using ShaderPtr = IShaderPtr;
 
 struct RenderingItem {
   ShaderPtr shaderInfo;
-  MaterialPtr material; // 材质句柄 — 用于 PipelineBuildDesc::fromRenderingItem
+  MaterialInstance::Ptr material; // 材质句柄 — 用于 PipelineBuildDesc::fromRenderingItem
 
   ObjectPCPtr objectInfo;
   IRenderResourcePtr vertexBuffer;

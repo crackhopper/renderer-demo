@@ -24,7 +24,7 @@ enum class TypeTag : uint8_t {
   VertexLayout,
   MeshRender,
   Skeleton,
-  RenderPassEntry,
+  MaterialPassDefinition,
   MaterialRender,
   ObjectRender,
   PipelineKey,

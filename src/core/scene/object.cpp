@@ -312,7 +312,8 @@ void SceneNode::unregisterMaterialPassListener() {
   }
 }
 
-RenderableSubMesh::RenderableSubMesh(MeshPtr mesh_, MaterialPtr material_,
+RenderableSubMesh::RenderableSubMesh(MeshPtr mesh_,
+                                     MaterialInstance::Ptr material_,
                                      SkeletonPtr skeleton_,
                                      std::string nodeName_)
     : mesh(std::move(mesh_)), material(std::move(material_)),

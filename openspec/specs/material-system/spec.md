@@ -2,15 +2,15 @@
 
 Define the current material system contract, including material templates, material instances, reflection-driven UBO access, and descriptor resources.
 ## Requirements
-### Requirement: MaterialInstance is the sole IMaterial implementation
-The system SHALL provide exactly one concrete implementation of `IMaterial`, named `MaterialInstance`. All `MaterialPtr` values held by scene objects, render queues, and backend code MUST refer to `MaterialInstance` instances. The legacy `DrawMaterial` class and the legacy `BlinnPhongMaterialUBO` struct MUST NOT exist in the codebase after this change.
+### Requirement: MaterialInstance is the sole material type
+The system SHALL provide exactly one concrete material type, named `MaterialInstance`. All `MaterialPtr` values held by scene objects, render queues, and backend code MUST be `MaterialInstance` shared pointers. The legacy `DrawMaterial` class and the legacy `BlinnPhongMaterialUBO` struct MUST NOT exist in the codebase after this change.
 
 #### Scenario: Scene constructs materials via MaterialInstance
 - **WHEN** a loader constructs a material for a `RenderableSubMesh`
 - **THEN** the returned `MaterialPtr` points to a `MaterialInstance` and the concrete type `DrawMaterial` is not referenced anywhere in `src/`
 
-#### Scenario: IMaterial virtual surface is preserved
-- **WHEN** rendering code calls `getShaderInfo()`, `getPassFlag()`, `getRenderState()`, `getDescriptorResources()`, or `getRenderSignature(pass)` on a `MaterialInstance`
+#### Scenario: MaterialInstance public surface is preserved
+- **WHEN** rendering code calls `getShaderInfo(pass)`, `getPassFlag()`, `getRenderState(pass)`, `getDescriptorResources()`, or `getRenderSignature(pass)` on a `MaterialInstance`
 - **THEN** each call returns a value consistent with the `MaterialTemplate`'s configuration and the instance's per-object state
 
 ### Requirement: MaterialTemplate requires a shader at construction
@@ -107,7 +107,7 @@ The core layer SHALL provide a `UboByteBufferResource` class that implements `IR
 - **THEN** the wrapper returns the updated bytes (no stale copy)
 
 ### Requirement: Loader returns MaterialInstance
-The file-shader loader for `blinnphong_0` SHALL be named `loadBlinnPhongMaterial` (or similar, not containing `DrawMaterial`) and SHALL return a `MaterialInstance::Ptr`. It SHALL compile the shader, reflect bindings, create a `MaterialTemplate`, configure at least one `RenderPassEntry`, call `buildBindingCache()`, create a `MaterialInstance`, and seed reasonable default uniform values via the reflection-driven setters. The legacy file `blinnphong_draw_material_loader.{hpp,cpp}` MUST be removed or rewritten in place.
+The file-shader loader for `blinnphong_0` SHALL be named `loadBlinnPhongMaterial` (or similar, not containing `DrawMaterial`) and SHALL return a `MaterialInstance::Ptr`. It SHALL compile the shader, reflect bindings, create a `MaterialTemplate`, configure at least one `MaterialPassDefinition`, call `buildBindingCache()`, create a `MaterialInstance`, and seed reasonable default uniform values via the reflection-driven setters. The legacy file `blinnphong_draw_material_loader.{hpp,cpp}` MUST be removed or rewritten in place.
 
 #### Scenario: Loader produces a ready-to-render MaterialInstance
 - **WHEN** `loadBlinnPhongMaterial()` is called
@@ -129,13 +129,13 @@ If `PC_Draw` remains in the codebase as a compatibility alias or extension point
 - **THEN** the push constant block layout matches the engine-wide model-only ABI and contains no skinning or lighting feature flags
 
 ### Requirement: MaterialTemplate owns shader variants per pass
-Shader variants that change shader code shape or pipeline identity SHALL belong to `MaterialTemplate` / loader output, not to `MaterialInstance`. For each configured pass, the loader MUST determine the enabled variant set, pass that set into shader compilation, and persist the same set in `RenderPassEntry::shaderSet.variants`.
+Shader variants that change shader code shape or pipeline identity SHALL belong to `MaterialTemplate` / loader output, not to `MaterialInstance`. For each configured pass, the loader MUST determine the enabled variant set, pass that set into shader compilation, and persist the same set in `MaterialPassDefinition::shaderSet.variants`.
 
 `MaterialInstance` SHALL continue to own only runtime instance parameters such as UBO values, textures, and pass enable state. Instance-level parameter writes MUST NOT introduce a new variant identity dimension.
 
 #### Scenario: Loader persists a skinning variant on the template pass
 - **WHEN** a loader creates a material template for a pass that enables skinning
-- **THEN** the pass's shader compilation input and stored `RenderPassEntry::shaderSet.variants` both include the skinning variant
+- **THEN** the pass's shader compilation input and stored `MaterialPassDefinition::shaderSet.variants` both include the skinning variant
 
 #### Scenario: Runtime parameter writes do not create variants
 - **WHEN** a `MaterialInstance` updates UBO values or textures for an existing pass
@@ -146,7 +146,7 @@ The loader for `blinnphong_0` SHALL be the authority for forward-shader variant-
 
 - declare the enabled subset of `USE_VERTEX_COLOR`, `USE_UV`, `USE_LIGHTING`, `USE_NORMAL_MAP`, and `USE_SKINNING`
 - pass that exact subset into shader compilation
-- persist that same subset in `RenderPassEntry::shaderSet.variants`
+- persist that same subset in `MaterialPassDefinition::shaderSet.variants`
 - validate the logical dependencies of the variant set before returning a material/template result
 
 If the enabled subset violates any mandatory dependency, the loader MUST emit a `FATAL` log and terminate the process immediately.
@@ -157,10 +157,10 @@ If the enabled subset violates any mandatory dependency, the loader MUST emit a 
 
 #### Scenario: Loader stores the validated variant set in compile input and pass metadata
 - **WHEN** the loader constructs a valid `blinnphong_0` pass with `USE_VERTEX_COLOR=1`, `USE_UV=1`, and `USE_LIGHTING=1`
-- **THEN** the shader compilation input and `RenderPassEntry::shaderSet.variants` contain the same validated variant subset
+- **THEN** the shader compilation input and `MaterialPassDefinition::shaderSet.variants` contain the same validated variant subset
 
 ### Requirement: MaterialInstance owns instance-level pass enable state
-`MaterialTemplate` SHALL remain the owner of pass definitions through its `pass -> RenderPassEntry` mapping. `MaterialInstance` SHALL own only the instance-level enabled subset of those template-defined passes.
+`MaterialTemplate` SHALL remain the owner of pass definitions through its `pass -> MaterialPassDefinition` mapping. `MaterialInstance` SHALL own only the instance-level enabled subset of those template-defined passes.
 
 A newly created `MaterialInstance` MUST enable every pass defined by its template by default.
 
@@ -193,7 +193,7 @@ The implementation MUST NOT treat a separate manually maintained bitmask as the 
 - **THEN** the returned `ResourcePassFlag` includes `Forward` and excludes `Shadow`
 
 ### Requirement: Material render-state queries are pass-aware
-Material render-state queries SHALL be pass-aware. The system MUST provide a material render-state lookup path keyed by `StringID pass`, and `MaterialInstance` render-state access MUST resolve the `RenderState` from the corresponding template-defined `RenderPassEntry` for that pass.
+Material render-state queries SHALL be pass-aware. The system MUST provide a material render-state lookup path keyed by `StringID pass`, and `MaterialInstance` render-state access MUST resolve the `RenderState` from the corresponding template-defined `MaterialPassDefinition` for that pass.
 
 The implementation MUST NOT preserve a Forward-only transitional meaning as the authoritative material render-state contract.
 

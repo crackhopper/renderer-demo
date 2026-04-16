@@ -66,35 +66,6 @@ private:
   std::vector<ShaderResourceBinding> m_bindings;
 };
 
-class FakeMaterial : public IMaterial {
-public:
-  FakeMaterial(MaterialTemplate::Ptr tmpl,
-               ResourcePassFlag passFlag = ResourcePassFlag::Forward)
-      : m_template(std::move(tmpl)), m_passFlag(passFlag) {}
-  std::vector<IRenderResourcePtr> getDescriptorResources() const override {
-    return {};
-  }
-  IShaderPtr getShaderInfo() const override {
-    return m_template ? m_template->getShader() : nullptr;
-  }
-  ResourcePassFlag getPassFlag() const override { return m_passFlag; }
-  RenderState getRenderState(StringID pass) const override {
-    (void)pass;
-    return {};
-  }
-
-  StringID getRenderSignature(StringID pass) const override {
-    StringID passSig =
-        m_template ? m_template->getRenderPassSignature(pass) : StringID{};
-    StringID fields[] = {passSig};
-    return GlobalStringTable::get().compose(TypeTag::MaterialRender, fields);
-  }
-
-private:
-  MaterialTemplate::Ptr m_template;
-  ResourcePassFlag m_passFlag;
-};
-
 std::shared_ptr<RenderableSubMesh>
 makeRenderable(const std::string &shaderName = "fake_fg",
                const std::vector<ShaderVariant> &variants = {},
@@ -110,15 +81,20 @@ makeRenderable(const std::string &shaderName = "fake_fg",
   ShaderProgramSet ps;
   ps.shaderName = shaderName;
   ps.variants = variants;
-  RenderPassEntry entry;
+  MaterialPassDefinition entry;
   entry.shaderSet = ps;
   entry.renderState = RenderState{};
   tmpl->setPass(Pass_Forward, std::move(entry));
-  // Shadow pass entries are intentionally omitted — the FakeMaterial's
-  // pass mask (m_passFlag) is what drives supportsPass filtering in
-  // RenderQueue::buildFromScene; pass-template population is orthogonal.
+  MaterialPassDefinition shadowEntry;
+  shadowEntry.shaderSet = ps;
+  shadowEntry.renderState = RenderState{};
+  tmpl->setPass(Pass_Shadow, std::move(shadowEntry));
 
-  auto material = std::make_shared<FakeMaterial>(tmpl, passFlag);
+  auto material = MaterialInstance::create(tmpl);
+  if ((static_cast<u32>(passFlag) & static_cast<u32>(ResourcePassFlag::Shadow)) ==
+      0u) {
+    material->setPassEnabled(Pass_Shadow, false);
+  }
   return std::make_shared<RenderableSubMesh>(mesh, material, nullptr);
 }
 

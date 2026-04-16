@@ -1,4 +1,4 @@
-#include "material.hpp"
+#include "material_instance.hpp"
 #include "core/frame_graph/pass.hpp"
 
 #include <algorithm>
@@ -188,7 +188,7 @@ IShaderPtr MaterialInstance::getShaderInfo(StringID pass) const {
 ResourcePassFlag MaterialInstance::getPassFlag() const {
   uint32_t mask = 0;
   if (!m_template)
-    return ResourcePassFlag::Forward;
+    return static_cast<ResourcePassFlag>(0);
   for (const auto &pass : m_enabledPasses) {
     if (!hasDefinedPass(pass))
       continue;

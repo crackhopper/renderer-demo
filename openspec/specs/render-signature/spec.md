@@ -16,7 +16,7 @@ The system SHALL provide a header `src/core/frame_graph/pass.hpp` exposing `Stri
 - **THEN** all three `StringID.id` values MUST be distinct
 
 ### Requirement: Leaf resources provide parameterless getRenderSignature
-Every leaf resource participating in pipeline identity SHALL provide a `StringID getRenderSignature() const` method that returns a structurally-interned `StringID` computed via `GlobalStringTable::compose(...)` or `GlobalStringTable::Intern(...)`. This applies to `VertexLayoutItem`, `VertexLayout`, `RenderState`, `ShaderProgramSet`, and `RenderPassEntry`.
+Every leaf resource participating in pipeline identity SHALL provide a `StringID getRenderSignature() const` method that returns a structurally-interned `StringID` computed via `GlobalStringTable::compose(...)` or `GlobalStringTable::Intern(...)`. This applies to `VertexLayoutItem`, `VertexLayout`, `RenderState`, `ShaderProgramSet`, and `MaterialPassDefinition`.
 
 `PrimitiveTopology` SHALL be handled by a free function `StringID topologySignature(PrimitiveTopology)` instead of a member, since enums cannot carry methods.
 
@@ -48,7 +48,7 @@ Every leaf resource participating in pipeline identity SHALL provide a `StringID
 - **THEN** both return the same `StringID` id under the current implementation
 
 ### Requirement: MaterialTemplate stores passes by StringID and composes per-pass signature
-`MaterialTemplate` SHALL store pass entries in `std::unordered_map<StringID, RenderPassEntry, StringID::Hash>`. Its `setPass` and `getEntry` methods SHALL accept `StringID` pass keys. It SHALL provide `StringID getRenderPassSignature(StringID pass) const` that looks up the entry for `pass` and returns `entry.getRenderSignature()` if present. If `pass` is not configured, the method MUST return `StringID{}` (the default / id-0 sentinel).
+`MaterialTemplate` SHALL store pass entries in `std::unordered_map<StringID, MaterialPassDefinition, StringID::Hash>`. Its `setPass` and `getEntry` methods SHALL accept `StringID` pass keys. It SHALL provide `StringID getRenderPassSignature(StringID pass) const` that looks up the entry for `pass` and returns `entry.getRenderSignature()` if present. If `pass` is not configured, the method MUST return `StringID{}` (the default / id-0 sentinel).
 
 #### Scenario: Pass lookup by StringID returns the configured entry
 - **WHEN** `tmpl->setPass(Pass_Forward, entry)` is called, then `tmpl->getRenderPassSignature(Pass_Forward)` is queried
@@ -58,8 +58,8 @@ Every leaf resource participating in pipeline identity SHALL provide a `StringID
 - **WHEN** `tmpl->getRenderPassSignature(Pass_Shadow)` is called but `Pass_Shadow` was never set
 - **THEN** the returned `StringID.id` equals `0`
 
-### Requirement: IMaterial exposes pass-aware getRenderSignature
-`IMaterial` SHALL declare `virtual StringID getRenderSignature(StringID pass) const = 0`. `MaterialInstance` (the concrete implementation from REQ-005) SHALL override it, returning `compose(TypeTag::MaterialRender, {templatePassSig})` where `templatePassSig` is `m_template->getRenderPassSignature(pass)`.
+### Requirement: MaterialInstance exposes pass-aware getRenderSignature
+`MaterialInstance` SHALL provide `StringID getRenderSignature(StringID pass) const`, returning `compose(TypeTag::MaterialRender, {templatePassSig})` where `templatePassSig` is `m_template->getRenderPassSignature(pass)`.
 
 #### Scenario: Two MaterialInstances sharing the same template and pass produce the same signature
 - **WHEN** two `MaterialInstance` objects built from the same `MaterialTemplate` are queried with `getRenderSignature(Pass_Forward)`

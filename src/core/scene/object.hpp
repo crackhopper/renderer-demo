@@ -51,7 +51,7 @@ using ObjectPCPtr = ObjectPC::Ptr;
 
 struct ValidatedRenderablePassData {
   StringID pass;
-  MaterialPtr material;
+  MaterialInstance::Ptr material;
   IShaderPtr shaderInfo;
   ObjectPCPtr objectInfo;
   IRenderResourcePtr vertexBuffer;
@@ -151,12 +151,12 @@ private:
 struct RenderableSubMesh final : public IRenderable {
 public:
   MeshPtr mesh;
-  MaterialPtr material;
+  MaterialInstance::Ptr material;
   std::optional<SkeletonPtr> skeleton;
   ObjectPCPtr objectPC;
   std::string nodeName = "RenderableSubMesh";
 
-  RenderableSubMesh(MeshPtr mesh_, MaterialPtr material_,
+  RenderableSubMesh(MeshPtr mesh_, MaterialInstance::Ptr material_,
                     SkeletonPtr skeleton_ = nullptr,
                     std::string nodeName_ = "RenderableSubMesh");
 
