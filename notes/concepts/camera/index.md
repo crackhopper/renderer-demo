@@ -64,8 +64,8 @@ camera->updateMatrices();
 
 对应需求：
 
-- [`REQ-015`](../../requirements/015-orbit-camera-controller.md)
-- [`REQ-016`](../../requirements/016-freefly-camera-controller.md)
+- [`REQ-015`](../../requirements/finished/015-orbit-camera-controller.md)
+- [`REQ-016`](../../requirements/finished/016-freefly-camera-controller.md)
 - [`REQ-026`](../../requirements/026-camera-visibility-layer-mask.md)
 
 ## 这条边界为什么重要

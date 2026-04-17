@@ -195,3 +195,5 @@ material asset 文件可以列出：
 ## 实施状态
 
 未开始。
+
+本次核查后，剩余工作统一并入 [`REQ-034`](034-remaining-validated-backlog.md)。

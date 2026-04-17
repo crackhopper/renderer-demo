@@ -39,6 +39,12 @@ add_subdirectory(src/infra)
 add_subdirectory(src/backend)
 add_subdirectory(src/test)
 
+# REQ-019: demo executables (default ON). Not registered with CTest.
+option(LX_BUILD_DEMOS "Build demo executables" ON)
+if(LX_BUILD_DEMOS)
+  add_subdirectory(src/demos)
+endif()
+
 
 
 

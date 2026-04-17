@@ -74,3 +74,5 @@
 - 还没有统一的 GPU multi-light buffer / light set
 - 还没有固定上限与裁剪/排序规则
 - 多光源数量变化与 shader 合同之间还没有正式 spec
+
+本次核查后，剩余工作统一并入 [`REQ-034`](034-remaining-validated-backlog.md)。

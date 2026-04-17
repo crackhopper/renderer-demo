@@ -23,6 +23,8 @@ public:
   void setMousePosition(Vec2f p) { m_pos = p; }
   void setMouseDelta(Vec2f d) { m_delta = d; }
   void setMouseWheelDelta(float w) { m_wheel = w; }
+  void setUiCapturingMouse(bool capturing) { m_uiCaptureMouse = capturing; }
+  void setUiCapturingKeyboard(bool capturing) { m_uiCaptureKeyboard = capturing; }
 
   bool isKeyDown(KeyCode k) const override {
     const auto index = static_cast<size_t>(k);
@@ -35,6 +37,8 @@ public:
   Vec2f getMousePosition() const override { return m_pos; }
   Vec2f getMouseDelta() const override { return m_delta; }
   float getMouseWheelDelta() const override { return m_wheel; }
+  bool isUiCapturingMouse() const override { return m_uiCaptureMouse; }
+  bool isUiCapturingKeyboard() const override { return m_uiCaptureKeyboard; }
 
   void nextFrame() override {
     m_delta = {0.0f, 0.0f};
@@ -47,6 +51,8 @@ private:
   Vec2f m_pos{0.0f, 0.0f};
   Vec2f m_delta{0.0f, 0.0f};
   float m_wheel = 0.0f;
+  bool m_uiCaptureMouse = false;
+  bool m_uiCaptureKeyboard = false;
 };
 
 } // namespace LX_core

@@ -216,9 +216,11 @@ virtual bool isUiCapturingKeyboard() const { return false; }
 
 ## 实施状态
 
-2026-04-16 核查结果：未开始。
+2026-04-17 已落地（对应 OpenSpec change `imgui-overlay`）：
 
-- `Gui` 仅有未接通的初始化雏形
-- `VulkanRenderer` 尚未驱动 ImGui
-- `Window` 还没有 `getNativeHandle()`
-- SDL 事件也尚未 forward 给 ImGui
+- `Gui::InitParams` 扩至包含 `nativeWindowHandle` / `renderPass` / `swapchainImageCount`；`init()` 完成 `CheckVersion → CreateContext → StyleColorsDark → ImplSDL3_InitForVulkan → 创建 descriptor pool → ImplVulkan_Init` 全链路，`shutdown()` 对称释放；`endFrame(VkCommandBuffer)` 接收真实 cmd 并对空 drawData 早退
+- `VulkanRenderer` 持有 `infra::Gui`，`initialize()` 末尾装配 InitParams 并调 init；`draw()` 按 "begin pass → beginFrame → UI 回调 → 场景 draw → endFrame(cmd) → end pass" 顺序录制；新增 `setDrawUiCallback(std::function<void()>)`
+- `Window` 新增 `getNativeHandle()`，SDL 返回 `SDL_Window*`，GLFW 返回 `GLFWwindow*`
+- `sdl_window::Impl::shouldClose()` 在单次 SDL poll 中先调 `ImGui_ImplSDL3_ProcessEvent`，再调 `Sdl3InputState::handleSdlEvent`，最后检查 quit；未 init 时通过 `ImGui::GetCurrentContext() != nullptr` 判空跳过 forward
+- `IInputState` 新增 `isUiCapturingMouse/Keyboard` 默认虚方法（默认返回 `false`）；`MockInputState` 暴露 setter 以供控制器测试
+- 集成测试 `test_imgui_overlay` 覆盖三条路径；在无 display 环境下 renderer 用例自动跳过，UI capture 默认行为断言通过

@@ -62,3 +62,5 @@
 - 没有 `SpotLight` 类型
 - 没有 `SpotLightUBO`
 - 没有 shader / scene-level descriptor 对聚光灯的正式消费合同
+
+本次核查后，剩余工作统一并入 [`REQ-034`](034-remaining-validated-backlog.md)。

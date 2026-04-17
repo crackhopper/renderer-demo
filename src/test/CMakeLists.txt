@@ -24,6 +24,9 @@ set(TEST_INTEGRATION_EXE_LIST
   test_sdl_input
   test_orbit_camera_controller
   test_freefly_camera_controller
+  test_imgui_overlay
+  test_debug_ui_smoke
+  test_gltf_loader
 
   # test_render_sphere
   # test_render_model
@@ -50,6 +53,17 @@ endforeach()
 if(USE_SDL AND TARGET test_sdl_input)
   target_compile_definitions(test_sdl_input PRIVATE USE_SDL=1)
   target_link_libraries(test_sdl_input PRIVATE LX_SDL3)
+endif()
+
+# ImGui overlay test needs USE_SDL and access to the imgui header
+if(USE_SDL AND TARGET test_imgui_overlay)
+  target_compile_definitions(test_imgui_overlay PRIVATE USE_SDL=1)
+  target_link_libraries(test_imgui_overlay PRIVATE imgui)
+endif()
+
+# debug_ui smoke test needs access to the imgui header
+if(TARGET test_debug_ui_smoke)
+  target_link_libraries(test_debug_ui_smoke PRIVATE imgui)
 endif()
 
 

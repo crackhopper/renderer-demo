@@ -186,7 +186,8 @@ private:
 
 ## 实施状态
 
-2026-04-16 核查结果：未开始。
+2026-04-17 已验证完成。
 
-- `FreeFlyCameraController` 尚未实现
-- `ICameraController` / `MockInputState` 仍依赖 `REQ-015` 落地
+- `src/core/scene/freefly_camera_controller.hpp/.cpp` 已实现 FreeFly 控制器
+- 复用了 `REQ-015` 已落地的 `ICameraController` 与 `MockInputState`
+- `src/test/integration/test_freefly_camera_controller.cpp` 已覆盖前进、mouse look、对角线归一化、加速与 pitch clamp，并在本次核查中通过

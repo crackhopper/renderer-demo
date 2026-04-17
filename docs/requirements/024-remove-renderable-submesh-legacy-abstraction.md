@@ -230,3 +230,5 @@
 - `src/core/scene/object.hpp` / `.cpp` 中仍保留 `RenderableSubMesh`
 - `buildLegacyValidatedData(...)` 仍存在
 - 多个集成测试、tutorial、示例代码仍直接构造 `RenderableSubMesh`
+
+本次核查后，剩余工作统一并入 [`REQ-034`](034-remaining-validated-backlog.md)。

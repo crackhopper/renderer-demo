@@ -222,9 +222,9 @@ private:
 
 ## 实施状态
 
-2026-04-16 核查结果：未开始。
+2026-04-17 已验证完成。
 
-- `Camera` 已存在，但仍无 controller 抽象
-- `DummyInputState` 已存在
-- `MockInputState` 尚未实现
-- `OrbitCameraController` 尚未实现
+- `src/core/scene/camera_controller.hpp` 已提供 `ICameraController`
+- `src/core/scene/orbit_camera_controller.hpp/.cpp` 已实现 Orbit 控制器
+- `src/core/input/mock_input_state.hpp` 已实现可写测试输入
+- `src/test/integration/test_orbit_camera_controller.cpp` 已覆盖默认位姿、旋转、pitch clamp、缩放 clamp、平移与 `nextFrame()` 行为，并在本次核查中通过

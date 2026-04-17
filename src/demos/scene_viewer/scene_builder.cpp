@@ -1,0 +1,218 @@
+#include "scene_builder.hpp"
+
+#include "core/asset/material_instance.hpp"
+#include "core/asset/mesh.hpp"
+#include "core/asset/texture.hpp"
+#include "core/rhi/index_buffer.hpp"
+#include "core/rhi/vertex_buffer.hpp"
+#include "core/utils/string_table.hpp"
+#include "infra/material_loader/generic_material_loader.hpp"
+#include "infra/mesh_loader/gltf_mesh_loader.hpp"
+#include "infra/texture_loader/texture_loader.hpp"
+
+#include <cstdint>
+#include <iostream>
+#include <stdexcept>
+#include <vector>
+
+namespace LX_demo::scene_viewer {
+
+namespace {
+
+using LX_core::CombinedTextureSampler;
+using LX_core::CombinedTextureSamplerPtr;
+using LX_core::IndexBuffer;
+using LX_core::MaterialInstancePtr;
+using LX_core::Mesh;
+using LX_core::MeshPtr;
+using LX_core::SceneNode;
+using LX_core::StringID;
+using LX_core::Texture;
+using LX_core::TextureDesc;
+using LX_core::TextureFormat;
+using LX_core::TexturePtr;
+using LX_core::Vec2f;
+using LX_core::Vec3f;
+using LX_core::Vec4f;
+using LX_core::Vec4i;
+using LX_core::VertexBuffer;
+using LX_core::VertexPosNormalUvBone;
+
+// One-shot warning so we don't spam stderr when geometry is missing a stream.
+void warnOnce(bool& flag, const char* msg) {
+  if (!flag) {
+    std::cerr << "[scene_viewer] " << msg << "\n";
+    flag = true;
+  }
+}
+
+// Build a VertexPosNormalUvBone buffer from a loaded GLTFLoader. Tangents get
+// a controlled placeholder (1, 0, 0, 1) when absent — REQ-011 explicitly
+// forbids MikkTSpace-style generation, and the blinnphong path we target
+// stays on enableNormal=0 when tangents are unavailable so the placeholder is
+// never sampled.
+MeshPtr buildMeshFromGltf(const infra::GLTFLoader& loader) {
+  const auto& positions = loader.getPositions();
+  const auto& normals = loader.getNormals();
+  const auto& uvs = loader.getTexCoords();
+  const auto& tangents = loader.getTangents();
+  const auto& indices = loader.getIndices();
+
+  if (positions.empty()) {
+    throw std::runtime_error(
+        "[scene_viewer] GLTFLoader returned empty positions");
+  }
+  if (indices.empty()) {
+    throw std::runtime_error(
+        "[scene_viewer] GLTFLoader returned empty indices");
+  }
+
+  static bool warnedNormals = false;
+  static bool warnedUvs = false;
+  static bool warnedTangents = false;
+  if (normals.empty()) {
+    warnOnce(warnedNormals, "glTF has no NORMAL stream; using {0,1,0}");
+  }
+  if (uvs.empty()) {
+    warnOnce(warnedUvs, "glTF has no TEXCOORD_0 stream; using {0,0}");
+  }
+  if (tangents.empty()) {
+    warnOnce(warnedTangents,
+             "glTF has no TANGENT stream; using placeholder {1,0,0,1} "
+             "(normal mapping stays off)");
+  }
+
+  std::vector<VertexPosNormalUvBone> verts;
+  verts.reserve(positions.size());
+
+  const Vec3f fallbackNormal{0.0f, 1.0f, 0.0f};
+  const Vec2f fallbackUv{0.0f, 0.0f};
+  const Vec4f fallbackTangent{1.0f, 0.0f, 0.0f, 1.0f};
+  const Vec4i zeroBones{0, 0, 0, 0};
+  const Vec4f zeroWeights{0.0f, 0.0f, 0.0f, 0.0f};
+
+  for (size_t i = 0; i < positions.size(); ++i) {
+    const Vec3f n = i < normals.size() ? normals[i] : fallbackNormal;
+    const Vec2f uv = i < uvs.size() ? uvs[i] : fallbackUv;
+    const Vec4f t = i < tangents.size() ? tangents[i] : fallbackTangent;
+    verts.emplace_back(positions[i], n, uv, t, zeroBones, zeroWeights);
+  }
+
+  auto vb = VertexBuffer<VertexPosNormalUvBone>::create(std::move(verts));
+  auto ib = IndexBuffer::create(std::vector<uint32_t>(indices));
+  return Mesh::create(vb, ib);
+}
+
+// Load an image file and wrap it in a CombinedTextureSampler the material
+// system understands. Uses RGBA8 (stb_image always delivers 4 channels via
+// STBI_rgb_alpha, which is what TextureLoader requests internally).
+CombinedTextureSamplerPtr loadCombinedTexture(
+    const std::filesystem::path& path) {
+  infra::TextureLoader loader;
+  loader.load(path.string());
+  const int w = loader.getWidth();
+  const int h = loader.getHeight();
+  if (w <= 0 || h <= 0 || loader.getData() == nullptr) {
+    throw std::runtime_error("[scene_viewer] failed to load texture: "
+                             + path.string());
+  }
+
+  const size_t byteCount = static_cast<size_t>(w) * static_cast<size_t>(h) * 4;
+  std::vector<uint8_t> pixels(loader.getData(), loader.getData() + byteCount);
+
+  TextureDesc desc{static_cast<uint32_t>(w), static_cast<uint32_t>(h),
+                   TextureFormat::RGBA8};
+  auto tex = std::make_shared<Texture>(desc, std::move(pixels));
+  return std::make_shared<CombinedTextureSampler>(std::move(tex));
+}
+
+// Bridge GLTFPbrMaterial → the existing blinnphong_default.material. Only
+// the base color texture is wired through; other PBR textures surface in the
+// UI panel for future reference but aren't bound to the Blinn-Phong shader.
+MaterialInstancePtr makeHelmetMaterial(const infra::GLTFPbrMaterial& pbr,
+                                       const std::filesystem::path& gltfDir) {
+  auto mat = LX_infra::loadGenericMaterial("materials/blinnphong_default.material");
+  if (!mat) {
+    throw std::runtime_error(
+        "[scene_viewer] failed to load materials/blinnphong_default.material");
+  }
+
+  // DamagedHelmet.gltf declares no TANGENT accessor — keep normal mapping off
+  // so the placeholder tangent is never sampled.
+  mat->setInt(StringID("enableNormal"), 0);
+
+  if (!pbr.baseColorTexture.empty()) {
+    try {
+      auto sampler = loadCombinedTexture(gltfDir / pbr.baseColorTexture);
+      mat->setTexture(StringID("albedoMap"), std::move(sampler));
+      mat->setInt(StringID("enableAlbedo"), 1);
+    } catch (const std::exception& e) {
+      std::cerr << "[scene_viewer] baseColor texture load failed ("
+                << e.what() << "); falling back to flat color\n";
+      mat->setInt(StringID("enableAlbedo"), 0);
+    }
+  } else {
+    mat->setInt(StringID("enableAlbedo"), 0);
+  }
+
+  mat->syncGpuData();
+  return mat;
+}
+
+MaterialInstancePtr makeGroundMaterial() {
+  auto mat = LX_infra::loadGenericMaterial("materials/blinnphong_default.material");
+  if (!mat) {
+    throw std::runtime_error(
+        "[scene_viewer] failed to load materials/blinnphong_default.material");
+  }
+  mat->setInt(StringID("enableAlbedo"), 0);
+  mat->setInt(StringID("enableNormal"), 0);
+  mat->setVec3(StringID("baseColor"), Vec3f{0.4f, 0.4f, 0.45f});
+  mat->syncGpuData();
+  return mat;
+}
+
+MeshPtr buildGroundMesh() {
+  const float half = 10.0f; // 20m x 20m
+  const Vec3f up{0.0f, 1.0f, 0.0f};
+  const Vec4f tangent{1.0f, 0.0f, 0.0f, 1.0f};
+  const Vec4i zeroBones{0, 0, 0, 0};
+  const Vec4f zeroWeights{0.0f, 0.0f, 0.0f, 0.0f};
+
+  std::vector<VertexPosNormalUvBone> verts;
+  verts.reserve(4);
+  verts.emplace_back(Vec3f{-half, 0.0f, -half}, up, Vec2f{0.0f, 0.0f},
+                     tangent, zeroBones, zeroWeights);
+  verts.emplace_back(Vec3f{half, 0.0f, -half}, up, Vec2f{1.0f, 0.0f}, tangent,
+                     zeroBones, zeroWeights);
+  verts.emplace_back(Vec3f{half, 0.0f, half}, up, Vec2f{1.0f, 1.0f}, tangent,
+                     zeroBones, zeroWeights);
+  verts.emplace_back(Vec3f{-half, 0.0f, half}, up, Vec2f{0.0f, 1.0f}, tangent,
+                     zeroBones, zeroWeights);
+
+  auto vb = VertexBuffer<VertexPosNormalUvBone>::create(std::move(verts));
+  auto ib = IndexBuffer::create(
+      std::vector<uint32_t>{0, 1, 2, 0, 2, 3});
+  return Mesh::create(vb, ib);
+}
+
+} // namespace
+
+LX_core::SceneNodePtr buildHelmetNode(const std::filesystem::path& gltfPath) {
+  infra::GLTFLoader loader;
+  loader.load(gltfPath.string());
+
+  auto mesh = buildMeshFromGltf(loader);
+  auto material =
+      makeHelmetMaterial(loader.getMaterial(), gltfPath.parent_path());
+
+  return SceneNode::create("helmet", std::move(mesh), std::move(material));
+}
+
+LX_core::SceneNodePtr buildGroundNode() {
+  auto mesh = buildGroundMesh();
+  auto material = makeGroundMaterial();
+  return SceneNode::create("ground", std::move(mesh), std::move(material));
+}
+
+} // namespace LX_demo::scene_viewer

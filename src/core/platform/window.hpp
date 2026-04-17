@@ -35,6 +35,16 @@ public:
 
   virtual InputStatePtr getInputState() const = 0;
 
+  /**
+   * @brief Returns the underlying native window handle as an opaque pointer.
+   *
+   * SDL backend returns `SDL_Window*`, GLFW backend returns `GLFWwindow*`.
+   * The core layer intentionally keeps this as `void*` so it does not need to
+   * depend on SDL/GLFW headers. Callers must know which backend is in use
+   * before casting.
+   */
+  virtual void* getNativeHandle() const = 0;
+
   virtual void onClose(std::function<void()> cb) = 0;
   virtual bool shouldClose() = 0;
 };

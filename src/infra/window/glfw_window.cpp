@@ -29,7 +29,10 @@ struct Window::Impl {
     glfwTerminate();
   }
 
-  bool shouldClose() const { return glfwWindowShouldClose(window); }
+  bool shouldClose() const {
+    glfwPollEvents();
+    return glfwWindowShouldClose(window);
+  }
 
   VkSurfaceKHR getVulkanSurface(VkInstance instance) const {
     VkSurfaceKHR surface;
@@ -66,7 +69,7 @@ Window::Window(const char *title, int width, int height)
 Window::~Window() { delete pImpl; }
 int Window::getWidth() const { return pImpl->width; }
 int Window::getHeight() const { return pImpl->height; }
-bool Window::shouldClose() const {
+bool Window::shouldClose() {
   bool result = pImpl->shouldClose();
   if (result && pImpl->closeCallback) {
     pImpl->closeCallback();
@@ -81,6 +84,10 @@ void Window::onClose(std::function<void()> cb) { pImpl->closeCallback = cb; }
 LX_core::InputStatePtr Window::getInputState() const {
   static auto dummy = std::make_shared<LX_core::DummyInputState>();
   return dummy;
+}
+
+void* Window::getNativeHandle() const {
+  return static_cast<void*>(pImpl->window);
 }
 
 void *Window::createGraphicsHandle(GraphicsAPI api,
@@ -99,6 +106,13 @@ void Window::destroyGraphicsHandle(GraphicsAPI api, void *graphicsInstance,
 
 void Window::getRequiredExtensions(std::vector<const char *> &extensions) const {
   pImpl->getRequiredExtensions(extensions);
+}
+
+void Window::updateSize(bool *closed, int *width, int *height) {
+  glfwGetFramebufferSize(pImpl->window, width, height);
+  pImpl->width = *width;
+  pImpl->height = *height;
+  *closed = glfwWindowShouldClose(pImpl->window);
 }
 
 

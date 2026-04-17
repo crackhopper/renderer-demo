@@ -8,7 +8,11 @@
 
 - [src/infra/mesh_loader/gltf_mesh_loader.cpp](../../src/infra/mesh_loader/gltf_mesh_loader.cpp) 的 `GLTFLoader::load()` 只读取文件头，然后对 `.gltf` / `.glb` 一律抛 `not yet supported`
 - [src/infra/mesh_loader/gltf_mesh_loader.hpp](../../src/infra/mesh_loader/gltf_mesh_loader.hpp) 目前只暴露 `positions` / `normals` / `texCoords` / `indices`
-- 当前仓库没有任何 vendored 的 glTF 解析库；`src/infra/external/include/` 里只有 `stb`、`tinyobjloader` 等已有依赖
+- 当前仓库没有任何 vendored 的 glTF 解析库
+- 但 `infra` 层的第三方依赖接入方式已经不是“在线下载”，而是把需要的头文件、源文件或预编译库直接纳入仓库，然后离线构建：
+  - `stb`、`tinyobjloader` 以 vendored header 方式存在于 `src/infra/external/include/`
+  - `SPIRV-Cross`、`yaml-cpp` 以 vendored source tree 方式存在于 `src/infra/external/`
+  - `SDL3` 以 vendored package 方式存在于 `src/infra/external/SDL3/`，按平台消费其头文件和库文件
 - `REQ-010` 已经把 `DamagedHelmet` 定义为后续 glTF/PBR 测试输入，但 `GLTFLoader` 还无法消费它
 - [notes/concepts/assets/index.md](../../notes/concepts/assets/index.md) 对“GLTF 已承载 PBR 元数据”的描述先于代码落地，需要等本 REQ 实现后才能成立
 
@@ -21,12 +25,21 @@
 3. 加载结果除了几何流外，还能暴露基础 PBR 材质元数据
 4. 支持读取 glTF 自带的 tangent；不要求在缺失时自动生成
 5. 为 DamagedHelmet 补集成测试，验证 end-to-end 加载闭环
+6. glTF 第三方依赖必须遵循项目现有的“仓库内直带依赖、离线直接构建”模式
 
 ## 需求
 
 ### R1: `cgltf` 第三方集成
 
-将 [cgltf](https://github.com/jkuhlmann/cgltf) 以 vendored single-header 方式纳入仓库：
+将 [cgltf](https://github.com/jkuhlmann/cgltf) 以 vendored 方式纳入仓库，并遵循当前项目已经形成的第三方依赖约束：
+
+- 依赖需要直接随仓库提交
+- 构建时不得依赖在线下载
+- 需要的头文件必须直接在仓库内可见
+- 若该库不是纯 header，则对应源文件或预编译库文件也必须直接在仓库内可见
+- CMake 必须能在离线环境下直接完成配置与构建
+
+对 `cgltf`，推荐落地形态仍然是 single-header + 一个实现宿主 cpp：
 
 - 新增 `src/infra/external/include/cgltf/cgltf.h`
 - 新增一个实现宿主 cpp，例如：
@@ -43,8 +56,31 @@
 
 - 不使用 git submodule
 - 不使用 FetchContent
-- 与现有 `stb` / `tinyobjloader` 的 vendored 方式保持一致
+- 不要求必须复刻 `stb` 的“仅 header”形态，但必须符合项目当前统一的离线依赖模式：
+  - header-only 库：头文件直接入仓
+  - source 形式库：头文件 + 源文件直接入仓
+  - 预编译包形式库：头文件 + 对应平台库文件直接入仓
+- `cgltf` 当前首选 single-header 方案，是因为它最贴近本 REQ 的轻量目标，不是因为项目只允许 header-only 第三方库
 - 若仓库还没有 `src/infra/external/README.md`，可新建并登记 cgltf 来源与 license
+
+### R1.5: 第三方依赖接入约束
+
+本 REQ 明确复用当前仓库已经采用的第三方依赖策略，而不是另起一套 glTF 特例。
+
+允许的依赖接入方式：
+
+- vendored header
+- vendored source tree
+- vendored 预编译 package（需同时包含头文件和对应平台库文件）
+
+不允许的依赖接入方式：
+
+- git submodule
+- `FetchContent`
+- 首次配置时联网下载源码或二进制
+- 依赖系统包管理器作为唯一来源
+
+对 `GLTFLoader` 这条需求而言，首选 `cgltf` 的原因是它可以用“头文件 + 一个实现宿主 cpp”满足上述约束，并且最小化额外构建复杂度。
 
 ### R2: `GLTFLoader` 接口扩展
 
@@ -225,6 +261,7 @@ private:
 - 不做 data URI 图像解析
 - 不把 glTF material 自动桥接到当前材质系统
 - 不把命名空间统一整理作为主闭环阻塞项
+- 不为 glTF loader 单独引入任何需要联网下载的第三方依赖流程
 
 ## 依赖
 
@@ -238,9 +275,12 @@ private:
 
 ## 实施状态
 
-2026-04-16 核查结果：未开始。
+2026-04-17 已落地（对应 OpenSpec change `gltf-pbr-loader`）：
 
-- `GLTFLoader` 仍为桩实现
-- `cgltf` 尚未引入
-- tangent 与 PBR 元数据接口尚未存在
-- DamagedHelmet 的加载测试尚未存在
+- `cgltf` v1.15 以 vendored single-header 方式纳入 `src/infra/external/include/cgltf/cgltf.h`；`src/infra/external/README.md` 登记全部 vendored 依赖（包括 cgltf、stb、tinyobjloader、imgui、SDL3、SPIRV-Cross、yaml-cpp）的 shape / upstream / version / license / consumers；构建流程无任何联网步骤
+- `src/infra/mesh_loader/cgltf_impl.cpp` 作为 `CGLTF_IMPLEMENTATION` 唯一宿主，加入 `src/infra/CMakeLists.txt` 的 `INFRA_SOURCES`
+- `src/infra/mesh_loader/gltf_mesh_loader.hpp` 新增 `GLTFPbrMaterial` 结构（baseColor/metallic/roughness/emissive factors + 5 张贴图 URI）、`getTangents()`、`getMaterial()`；PImpl 隔离，header 不引入 cgltf
+- `gltf_mesh_loader.cpp` 用 `cgltf_parse_file` + `cgltf_load_buffers` 实现真实解析；消费 `meshes[0].primitives[0]`；POSITION 必需，NORMAL/TEXCOORD_0/TANGENT 可选；index 支持 u8/u16/u32 widen 至 uint32_t；primitive 非三角形、data URI / buffer_view inline 图像、解析失败均抛 `std::runtime_error`（message 带文件路径与 cgltf 错误码可读化）；多 mesh / 多 primitive 打 warning 取 [0]
+- 贴图 URI 以相对 `.gltf` 所在目录形式存储，不做 filesystem resolve
+- `src/test/integration/test_gltf_loader.cpp` 新增 3 用例（`loads_damaged_helmet` / `throws_on_missing_file` / `throws_on_corrupt_file`）并注册到 `src/test/CMakeLists.txt`，本地 PASS
+- 注：本仓库 DamagedHelmet.gltf 未声明 TANGENT accessor，集成测试据此断言 `getTangents()` 为空且 loader 不抛；材质桥接到 `MaterialInstance` 留给 REQ-019 / 后续材质需求

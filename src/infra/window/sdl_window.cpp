@@ -3,6 +3,8 @@
 #include "sdl3_input_state.hpp"
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
+#include <backends/imgui_impl_sdl3.h>
+#include <imgui.h>
 #include <functional>
 #include <iostream>
 #include <stdexcept>
@@ -41,7 +43,14 @@ struct Window::Impl {
   bool shouldClose() {
     SDL_Event event;
     bool quit = false;
+    // Forward each SDL event to ImGui (no-op until ImGui context exists),
+    // then to the input state, then check for quit. Single poll loop so no
+    // event is consumed twice.
+    const bool imguiReady = ImGui::GetCurrentContext() != nullptr;
     while (SDL_PollEvent(&event)) {
+      if (imguiReady) {
+        ImGui_ImplSDL3_ProcessEvent(&event);
+      }
       if (inputState->handleSdlEvent(event)) {
         quit = true;
       }
@@ -124,6 +133,10 @@ void Window::onClose(std::function<void()> cb) { pImpl->closeCallback = cb; }
 
 LX_core::InputStatePtr Window::getInputState() const {
   return pImpl->inputState;
+}
+
+void* Window::getNativeHandle() const {
+  return static_cast<void*>(pImpl->window);
 }
 
 WindowGraphicsHandle

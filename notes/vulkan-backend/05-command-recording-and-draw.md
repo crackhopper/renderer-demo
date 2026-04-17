@@ -21,15 +21,20 @@
 6. 分配主命令缓冲并 `begin()`
 7. `beginRenderPass(...)`
 8. `setViewport(...)` 和 `setScissor(...)`
-9. 遍历所有 pass 和 item
-10. `bindPipeline(...)`
-11. `bindResources(...)`
-12. `drawItem(...)`
-13. 结束 render pass 和命令缓冲
-14. `vkQueueSubmit(...)`
-15. `present(...)`
+9. `gui.beginFrame()` 并调用外部注册的 UI 回调（REQ-017 overlay 路径）
+10. 遍历所有 pass 和 item
+11. `bindPipeline(...)`
+12. `bindResources(...)`
+13. `drawItem(...)`
+14. `gui.endFrame(cmd)` 把 ImGui draw data 合并到当前 swapchain render pass
+15. 结束 render pass 和命令缓冲
+16. `vkQueueSubmit(...)`
+17. `present(...)`
 
-这是一个很典型的“每帧一个主 command buffer”的模型。
+这是一个很典型的“每帧一个主 command buffer”的模型。ImGui overlay 不走独立 FrameGraph pass：
+它被录制在 swapchain render pass 的尾部（`endFrame(cmd)` → `endRenderPass`），共享同一个 render
+pass 与 command buffer。`VulkanRenderer::setDrawUiCallback` 是唯一的 UI 注入入口，回调运行时
+ImGui 上下文已 `NewFrame`，调用 `ImGui::Text` / `ImGui::Begin` 即可。
 
 ## `bindPipeline(...)` 做了什么
 

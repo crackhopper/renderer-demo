@@ -2,6 +2,7 @@
 #include "core/rhi/render_resource.hpp"
 #include "core/frame_graph/frame_graph.hpp"
 #include "core/frame_graph/pass.hpp"
+#include "infra/gui/gui.hpp"
 #include "infra/window/window.hpp"
 #include "details/commands/command_buffer_manager.hpp"
 #include "details/descriptors/descriptor_manager.hpp"
@@ -12,6 +13,7 @@
 #include "details/resource_manager.hpp"
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -123,6 +125,22 @@ public:
 
     swapchain = VulkanSwapchain::create(*device, _window, maxFramesInFlight);
     swapchain->initialize(resourceManager->getRenderPass());
+
+    // REQ-017: bring up ImGui overlay inside the swapchain render pass.
+    infra::Gui::InitParams guiParams{};
+    guiParams.instance = device->getInstance();
+    guiParams.physicalDevice = device->getPhysicalDevice();
+    guiParams.device = device->getLogicalDevice();
+    guiParams.graphicsQueueFamilyIndex = device->getGraphicsQueueFamilyIndex();
+    guiParams.presentQueueFamilyIndex = device->getPresentQueueFamilyIndex();
+    guiParams.graphicsQueue = device->getGraphicsQueue();
+    guiParams.presentQueue = device->getPresentQueue();
+    guiParams.surface = device->getSurface();
+    guiParams.nativeWindowHandle = _window->getNativeHandle();
+    guiParams.renderPass = resourceManager->getRenderPass().getHandle();
+    guiParams.swapchainImageCount = swapchain->getImageCount();
+    m_gui.init(guiParams);
+
     if (rendererDebugEnabled()) {
       const VkExtent2D extent = swapchain->getExtent();
       std::cerr << "[RendererDebug] initialize: extent=" << extent.width << "x"
@@ -245,8 +263,7 @@ public:
         acquireResult == VK_SUBOPTIMAL_KHR) {
       VkFence fence = swapchain->getInFlightFence(currentFrameIndex);
       vkResetFences(device->getLogicalDevice(), 1, &fence);
-      swapchain->waitIdle();
-      swapchain->rebuild(resourceManager->getRenderPass());
+      rebuildSwapchain();
       return;
     }
     if (acquireResult != VK_SUCCESS) {
@@ -269,6 +286,15 @@ public:
     cmd->setViewport(extent.width, extent.height);
     cmd->setScissor(extent.width, extent.height);
 
+    // REQ-017: overlay path. Kick off an ImGui frame *inside* the swapchain
+    // render pass so the UI callback can emit widgets before scene draws,
+    // and the final ImGui draw data is merged via endFrame(cmd) right before
+    // endRenderPass.
+    m_gui.beginFrame();
+    if (m_drawUiCallback) {
+      m_drawUiCallback();
+    }
+
     // Iterate every pass × every item in the FrameGraph. Each item may use a
     // different pipeline; bindPipeline / bindResources / drawItem per item.
     for (auto &pass : m_frameGraph.getPasses()) {
@@ -279,6 +305,8 @@ public:
         cmd->drawItem(item);
       }
     }
+
+    m_gui.endFrame(cmd->getHandle());
 
     cmd->endRenderPass();
     cmd->end();
@@ -311,12 +339,15 @@ public:
     VkResult presentResult = swapchain->present(currentFrameIndex, imageIndex);
     if (presentResult == VK_ERROR_OUT_OF_DATE_KHR ||
         presentResult == VK_SUBOPTIMAL_KHR) {
-      swapchain->waitIdle();
-      swapchain->rebuild(resourceManager->getRenderPass());
+      rebuildSwapchain();
       return;
     }
 
     frameIndex++;
+  }
+
+  void setDrawUiCallback(std::function<void()> cb) {
+    m_drawUiCallback = std::move(cb);
   }
 
   VulkanDevicePtr device = nullptr;
@@ -328,11 +359,25 @@ public:
   LX_core::FrameGraph m_frameGraph{};
   uint32_t frameIndex = 0;
 
+  infra::Gui m_gui{};
+  std::function<void()> m_drawUiCallback{};
+
 private:
+  void rebuildSwapchain() {
+    swapchain->waitIdle();
+    swapchain->rebuild(resourceManager->getRenderPass());
+    m_gui.updateSwapchainImageCount(swapchain->getImageCount());
+  }
+
   void destroy() {
     if (device) {
       // 关键：等 GPU 干完活再删东西
       vkDeviceWaitIdle(device->getLogicalDevice());
+    }
+    // REQ-017: tear down ImGui before releasing Vulkan device so that
+    // ImGui's descriptor pool / backend objects still see a live VkDevice.
+    if (m_gui.isInitialized()) {
+      m_gui.shutdown();
     }
     // 1. 销毁 Command Buffer Manager
     cmdBufferMgr.reset();
@@ -362,5 +407,21 @@ VulkanRenderer::VulkanRenderer(Token token) : p_impl(nullptr) {
 }
 
 VulkanRenderer::~VulkanRenderer() { delete p_impl; }
+
+void VulkanRenderer::initialize(WindowPtr window, const char *appName) {
+  p_impl->initialize(window, appName);
+}
+
+void VulkanRenderer::shutdown() { p_impl->shutdown(); }
+
+void VulkanRenderer::initScene(ScenePtr scene) { p_impl->initScene(scene); }
+
+void VulkanRenderer::uploadData() { p_impl->uploadData(); }
+
+void VulkanRenderer::draw() { p_impl->draw(); }
+
+void VulkanRenderer::setDrawUiCallback(std::function<void()> cb) {
+  p_impl->setDrawUiCallback(std::move(cb));
+}
 
 } // namespace LX_core::backend

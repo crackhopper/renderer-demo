@@ -52,6 +52,7 @@ public:
     static auto dummy = std::make_shared<DummyInputState>();
     return dummy;
   }
+  void* getNativeHandle() const override { return nullptr; }
   void onClose(std::function<void()> cb) override { m_onClose = std::move(cb); }
   bool shouldClose() override {
     ++shouldCloseCalls;

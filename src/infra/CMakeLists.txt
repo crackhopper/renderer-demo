@@ -286,6 +286,41 @@ if(NOT TARGET LX_SDL3)
 endif()
 
 # -------------------------------
+# GLFW
+# -------------------------------
+if(USE_GLFW)
+    find_package(glfw3 QUIET CONFIG)
+
+    if(TARGET GLFW::GLFW)
+        set(LX_GLFW_TARGET GLFW::GLFW)
+    elseif(TARGET glfw)
+        set(LX_GLFW_TARGET glfw)
+    elseif(TARGET glfw3::glfw)
+        set(LX_GLFW_TARGET glfw3::glfw)
+    else()
+        find_path(GLFW_INCLUDE_DIR GLFW/glfw3.h)
+        find_library(GLFW_LIBRARY NAMES glfw3 glfw)
+        if(GLFW_INCLUDE_DIR AND GLFW_LIBRARY)
+            add_library(LX_GLFW_IMPORTED UNKNOWN IMPORTED GLOBAL)
+            set_target_properties(LX_GLFW_IMPORTED PROPERTIES
+                IMPORTED_LOCATION "${GLFW_LIBRARY}"
+                INTERFACE_INCLUDE_DIRECTORIES "${GLFW_INCLUDE_DIR}")
+            set(LX_GLFW_TARGET LX_GLFW_IMPORTED)
+        else()
+            message(FATAL_ERROR
+                "GLFW not found.\n"
+                "Install a GLFW development package or provide a CMake package "
+                "that defines GLFW::GLFW / glfw / glfw3::glfw.")
+        endif()
+    endif()
+
+    if(NOT TARGET LX_GLFW)
+        add_library(LX_GLFW INTERFACE)
+        target_link_libraries(LX_GLFW INTERFACE ${LX_GLFW_TARGET})
+    endif()
+endif()
+
+# -------------------------------
 # imgui - only needed backends
 # -------------------------------
 add_subdirectory(external/cmake/imgui)
@@ -296,10 +331,12 @@ set(INFRA_LIB LX_Infra CACHE INTERNAL "Infra library name")
 set(INFRA_SOURCES
     material_loader/generic_material_loader.cpp
     gui/imgui_gui.cpp
+    gui/debug_ui.cpp
     texture_loader/texture_loader.cpp
     texture_loader/placeholder_textures.cpp
     mesh_loader/obj_mesh_loader.cpp
     mesh_loader/gltf_mesh_loader.cpp
+    mesh_loader/cgltf_impl.cpp
     shader_compiler/shader_compiler.cpp
     shader_compiler/shader_reflector.cpp
     shader_compiler/compiled_shader.cpp
@@ -348,5 +385,5 @@ if(USE_SDL)
     target_link_libraries(${INFRA_LIB} PRIVATE LX_SDL3)
 elseif(USE_GLFW)
     target_compile_definitions(${INFRA_LIB} PRIVATE USE_GLFW=1)
-    target_link_libraries(${INFRA_LIB} PRIVATE GLFW::GLFW)
+    target_link_libraries(${INFRA_LIB} PRIVATE LX_GLFW)
 endif()

@@ -63,3 +63,5 @@
 - `Camera` 尚无 culling mask
 - renderable 尚无 layer mask
 - queue 构建阶段也还没有 layer 过滤
+
+本次核查后，剩余工作统一并入 [`REQ-034`](034-remaining-validated-backlog.md)。

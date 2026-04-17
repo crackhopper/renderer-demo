@@ -53,7 +53,7 @@ Phase 1 roadmap 已经把 Environment Map Loader 和 IBL Prefilter 列为 REQ-10
 ## 依赖
 
 - `notes/roadmaps/phase-1-rendering-depth.md` 中的 `REQ-105` / `REQ-106`
-- [`REQ-010`](010-test-assets-and-layout.md) 的 HDR 资产输入
+- [`REQ-010`](finished/010-test-assets-and-layout.md) 的 HDR 资产输入
 
 ## 实施状态
 
@@ -61,3 +61,5 @@ Phase 1 roadmap 已经把 Environment Map Loader 和 IBL Prefilter 列为 REQ-10
 
 - 代码里还没有 IBL scene-level resource
 - notes 侧也仍明确标注 IBL 尚未正式接入 scene
+
+本次核查后，剩余工作统一并入 [`REQ-034`](034-remaining-validated-backlog.md)。

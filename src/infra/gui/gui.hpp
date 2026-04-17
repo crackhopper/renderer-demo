@@ -1,5 +1,6 @@
 #pragma once
 #include <vulkan/vulkan.h>
+#include <cstdint>
 #include <functional>
 
 namespace infra {
@@ -15,6 +16,10 @@ public:
     VkQueue graphicsQueue;
     VkQueue presentQueue;
     VkSurfaceKHR surface;
+    // SDL path: must be an SDL_Window*. GLFW path: GLFWwindow*.
+    void* nativeWindowHandle;
+    VkRenderPass renderPass;
+    uint32_t swapchainImageCount;
   };
 
   Gui();
@@ -22,7 +27,8 @@ public:
 
   void init(const InitParams& params);
   void beginFrame();
-  void endFrame();
+  void endFrame(VkCommandBuffer cmd);
+  void updateSwapchainImageCount(uint32_t imageCount);
   void shutdown();
 
   bool isInitialized() const;

@@ -225,7 +225,12 @@ void directionalLightPanel(const char* title,
 
 ## 实施状态
 
-2026-04-16 核查结果：未开始。
+2026-04-17 已落地（对应 OpenSpec change `debug-ui-helper`）：
 
-- `src/infra/gui/` 还没有 `debug_ui` helper
-- 现有 ImGui 接线仍停留在 `REQ-017` 的待实现阶段
+- 新增 `src/infra/gui/debug_ui.{hpp,cpp}`，命名空间 `LX_infra::debug_ui`；`.hpp` 不引入 ImGui 头，ImGui 依赖封在 `.cpp` 内
+- 基础桥接齐全：`dragVec3/Vec4`、`sliderFloat/Int`、`colorEdit3/4`、`labelText`（`const char*` / `std::string` 双重载）、`labelFloat/Int`、`labelStringId`（空名回退 `"(empty #<id>)"`）；`.cpp` 顶部有 `sizeof(Vec3f)` / `sizeof(Vec4f)` 静态断言
+- Panel 容器：`beginPanel/endPanel`（`FirstUseEver` 默认位置 `{8,8}`、默认大小 `{320,400}`），`beginSection/endSection`（`CollapsingHeader` + no-op pop），`separatorText`
+- 组合 panel：`renderStatsPanel(Clock&)` 显示 frame count / dt (ms) / fps；`cameraPanel` 编辑 `position/target/up/fovY/aspect/near/far` 但**不**内部 `updateMatrices()`；`directionalLightPanel` 直接编辑 `ubo->param.{dir,color}`，任一 widget 变更即 `light.ubo->setDirty()`
+- 不包含 `materialPanel` / scene graph inspector / DSL / 新 framework
+- `src/infra/CMakeLists.txt` 的 `INFRA_SOURCES` 追加 `gui/debug_ui.cpp`
+- 集成测试 `test_debug_ui_smoke` 覆盖链接级符号可见 + CPU-only ImGui smoke（CreateContext → NewFrame → helper 全套 → EndFrame → DestroyContext），无 display 即可运行

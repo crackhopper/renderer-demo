@@ -27,6 +27,13 @@ public:
 
   // ---- 帧推进 ----
   virtual void nextFrame() = 0;
+
+  // ---- UI capture 协调 ----
+  // 默认返回 false。上层 UI（如 ImGui）声明希望独占输入时，具体实现可覆写
+  // 这两个方法（例如返回 ImGui::GetIO().WantCapture*），相机控制器等消费者
+  // 据此决定是否让出鼠标/键盘控制权。
+  virtual bool isUiCapturingMouse() const { return false; }
+  virtual bool isUiCapturingKeyboard() const { return false; }
 };
 
 using InputStatePtr = std::shared_ptr<IInputState>;

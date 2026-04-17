@@ -25,6 +25,8 @@ public:
 
   LX_core::InputStatePtr getInputState() const override;
 
+  void* getNativeHandle() const override;
+
   bool shouldClose() override;
 
   void onClose(std::function<void()> cb) override;
