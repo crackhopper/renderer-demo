@@ -16,7 +16,11 @@ variantRules:
 passes:
   Forward:
     renderState:
-      cullMode: Back
+      # Demo does not apply glTF node transforms, so raw mesh-space winding
+      # may not match the pipeline's CCW-front-face assumption. Disable
+      # culling until proper node-transform support lands; the cost is
+      # negligible for a single-mesh demo.
+      cullMode: None
       depthTest: true
       depthWrite: true
 

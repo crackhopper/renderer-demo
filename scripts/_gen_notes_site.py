@@ -25,12 +25,14 @@ NOTES_DIR = REPO_ROOT / "notes"
 REQ_LINK_DIR = NOTES_DIR / "requirements"
 TOOLS_DIR = NOTES_DIR / "tools"
 ROADMAPS_DIR = NOTES_DIR / "roadmaps"
+TEMPORARY_DIR = NOTES_DIR / "temporary"
 MKDOCS_SRC = REPO_ROOT / "mkdocs.yml"
 MKDOCS_GEN = REPO_ROOT / "mkdocs.gen.yml"
 NAV_CONFIG = NOTES_DIR / "nav.yml"
 
 NAV_SECTION_TITLE = "需求（进行中）"
 TOOLS_SECTION_TITLE = "相关工具"
+TEMPORARY_SECTION_TITLE = "临时笔记"
 HEADING_RE = re.compile(r"^#\s+(.+?)\s*$")
 
 
@@ -62,6 +64,24 @@ def discover_roadmaps() -> list[Path]:
     files = [
         p for p in ROADMAPS_DIR.iterdir()
         if p.is_file() and p.suffix == ".md" and p.name != "README.md"
+    ]
+    files.sort(key=lambda p: p.name)
+    return files
+
+
+def discover_temporary() -> list[Path]:
+    """Pick up anything under notes/temporary/ as stand-alone short-lived notes.
+
+    Intended for resize-fix writeups, incident post-mortems, day-of-debugging
+    notes — anything that doesn't deserve a permanent slot in the design docs
+    but is useful to index. Sort by filename so date-prefixed names surface
+    chronologically.
+    """
+    if not TEMPORARY_DIR.is_dir():
+        return []
+    files = [
+        p for p in TEMPORARY_DIR.iterdir()
+        if p.is_file() and p.suffix == ".md" and p.name != "index.md"
     ]
     files.sort(key=lambda p: p.name)
     return files
@@ -150,6 +170,24 @@ def write_tools_index(tool_files: list[Path]) -> None:
     index_path.write_text("\n".join(lines), encoding="utf-8")
 
 
+def write_temporary_index(temporary_files: list[Path]) -> None:
+    TEMPORARY_DIR.mkdir(parents=True, exist_ok=True)
+    index_path = TEMPORARY_DIR / "index.md"
+    lines = [
+        "# 临时笔记",
+        "",
+        "本目录收录 `notes/temporary/` 下的即时笔记 —— 调试记录、事故复盘、"
+        "日常排查。文件名以日期前缀排序。不进入正式设计文档体系，但被 "
+        "`serve-notes` 自动索引以便回查。",
+        "",
+    ]
+    for p in temporary_files:
+        title = extract_title(p, p.stem)
+        lines.append(f"- [{title}]({p.name})")
+    lines.append("")
+    index_path.write_text("\n".join(lines), encoding="utf-8")
+
+
 def validate_note_path(path_str: str, context: str) -> str:
     note_path = NOTES_DIR / path_str
     if not note_path.is_file():
@@ -166,7 +204,12 @@ def build_generated_nav_item(md_path: Path, nav_path: str | None = None) -> dict
     return {extract_title(md_path, md_path.stem): path_str}
 
 
-def expand_nav_token(token: str, req_files: list[Path], roadmap_files: list[Path]) -> list[dict]:
+def expand_nav_token(
+    token: str,
+    req_files: list[Path],
+    roadmap_files: list[Path],
+    temporary_files: list[Path],
+) -> list[dict]:
     if token == "@requirements":
         return [
             build_generated_nav_item(p, f"requirements/{p.name}")
@@ -174,17 +217,31 @@ def expand_nav_token(token: str, req_files: list[Path], roadmap_files: list[Path
         ]
     if token == "@roadmaps":
         return [build_generated_nav_item(p) for p in roadmap_files]
+    if token == "@temporary":
+        return [build_generated_nav_item(p) for p in temporary_files]
     raise ValueError(f"unsupported nav token '{token}'")
 
 
-def normalize_nav_list(entries: list[object], context: str, req_files: list[Path], roadmap_files: list[Path]) -> list:
+def normalize_nav_list(
+    entries: list[object],
+    context: str,
+    req_files: list[Path],
+    roadmap_files: list[Path],
+    temporary_files: list[Path],
+) -> list:
     normalized: list = []
     for index, entry in enumerate(entries):
         entry_context = f"{context}[{index}]"
         if isinstance(entry, str) and entry.startswith("@"):
-            normalized.extend(expand_nav_token(entry, req_files, roadmap_files))
+            normalized.extend(
+                expand_nav_token(entry, req_files, roadmap_files, temporary_files)
+            )
             continue
-        normalized.append(normalize_nav_entry(entry, entry_context, req_files, roadmap_files))
+        normalized.append(
+            normalize_nav_entry(
+                entry, entry_context, req_files, roadmap_files, temporary_files
+            )
+        )
     return normalized
 
 
@@ -193,6 +250,7 @@ def normalize_nav_entry(
     context: str,
     req_files: list[Path],
     roadmap_files: list[Path],
+    temporary_files: list[Path],
 ) -> object:
     if isinstance(entry, str):
         return validate_note_path(entry, context)
@@ -209,14 +267,22 @@ def normalize_nav_entry(
         if isinstance(value, str):
             return {title: validate_note_path(value, child_context)}
         if isinstance(value, list):
-            return {title: normalize_nav_list(value, child_context, req_files, roadmap_files)}
+            return {
+                title: normalize_nav_list(
+                    value, child_context, req_files, roadmap_files, temporary_files
+                )
+            }
 
         raise ValueError(f"{child_context}: nav value must be a path or list")
 
     raise ValueError(f"{context}: unsupported nav entry type {type(entry).__name__}")
 
 
-def load_nav_config(req_files: list[Path], roadmap_files: list[Path]) -> list:
+def load_nav_config(
+    req_files: list[Path],
+    roadmap_files: list[Path],
+    temporary_files: list[Path],
+) -> list:
     if not NAV_CONFIG.is_file():
         raise FileNotFoundError(f"{NAV_CONFIG} not found")
 
@@ -227,7 +293,7 @@ def load_nav_config(req_files: list[Path], roadmap_files: list[Path]) -> list:
     if not isinstance(nav, list) or not nav:
         raise ValueError("notes/nav.yml must define a non-empty 'nav' list")
 
-    return normalize_nav_list(nav, "nav", req_files, roadmap_files)
+    return normalize_nav_list(nav, "nav", req_files, roadmap_files, temporary_files)
 
 
 def inject_into_mkdocs(req_files: list[Path], tool_files: list[Path], nav: list) -> None:
@@ -274,9 +340,11 @@ def main() -> int:
     req_files = discover_requirements()
     tool_files = discover_tools()
     roadmap_files = discover_roadmaps()
+    temporary_files = discover_temporary()
     sync_symlinks(req_files)
     write_tools_index(tool_files)
-    nav = load_nav_config(req_files, roadmap_files)
+    write_temporary_index(temporary_files)
+    nav = load_nav_config(req_files, roadmap_files, temporary_files)
     inject_into_mkdocs(req_files, tool_files, nav)
 
     print(f">> Generated {MKDOCS_GEN.relative_to(REPO_ROOT)}")
@@ -289,6 +357,9 @@ def main() -> int:
         print(f"     - {p.name}")
     print(f"   Roadmap: {len(roadmap_files)} 篇")
     for p in roadmap_files:
+        print(f"     - {p.name}")
+    print(f"   {TEMPORARY_SECTION_TITLE}: {len(temporary_files)} 篇")
+    for p in temporary_files:
         print(f"     - {p.name}")
     return 0
 

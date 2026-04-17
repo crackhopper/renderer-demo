@@ -67,8 +67,24 @@ Window::Window(const char *title, int width, int height)
     : pImpl(new Impl(title, width, height)) {}
 
 Window::~Window() { delete pImpl; }
-int Window::getWidth() const { return pImpl->width; }
-int Window::getHeight() const { return pImpl->height; }
+// Live-query to survive window resizes: swapchain rebuild asks getWidth/Height
+// to pick up the new framebuffer extent.
+int Window::getWidth() const {
+  int w = pImpl->width;
+  int h = pImpl->height;
+  glfwGetFramebufferSize(pImpl->window, &w, &h);
+  pImpl->width = w;
+  pImpl->height = h;
+  return w;
+}
+int Window::getHeight() const {
+  int w = pImpl->width;
+  int h = pImpl->height;
+  glfwGetFramebufferSize(pImpl->window, &w, &h);
+  pImpl->width = w;
+  pImpl->height = h;
+  return h;
+}
 bool Window::shouldClose() {
   bool result = pImpl->shouldClose();
   if (result && pImpl->closeCallback) {

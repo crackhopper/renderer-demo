@@ -106,6 +106,8 @@ public:
   void initialize(WindowPtr _window, const char *appName) override {
     const int maxFramesInFlight = 3;
 
+    m_window = _window;
+
     device = VulkanDevice::create();
     device->initialize(_window, appName);
     // Window backends return an allocated handle pointer (void*) for Vulkan.
@@ -252,6 +254,15 @@ public:
 
   void draw() override {
     const uint32_t maxFramesInFlight = 3;
+
+    // If the window has zero client area (minimized or in the middle of a
+    // drag-resize on Windows), rebuilding or acquiring would either fail or
+    // produce an invalid swapchain. Skip this frame cleanly; the next call
+    // will retry once the window has non-zero size again.
+    if (m_window && (m_window->getWidth() <= 0 || m_window->getHeight() <= 0)) {
+      return;
+    }
+
     const VkExtent2D extent = swapchain->getExtent();
 
     const uint32_t currentFrameIndex = frameIndex % maxFramesInFlight;
@@ -261,14 +272,13 @@ public:
         swapchain->acquireNextImage(currentFrameIndex, imageIndex);
     if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR ||
         acquireResult == VK_SUBOPTIMAL_KHR) {
-      VkFence fence = swapchain->getInFlightFence(currentFrameIndex);
-      vkResetFences(device->getLogicalDevice(), 1, &fence);
+      // No queue submission will happen on this path, so keep the frame fence
+      // signaled. Resetting it here would leave the next acquire blocked if
+      // swapchain rebuild is deferred while the window is zero-sized.
       rebuildSwapchain();
       return;
     }
     if (acquireResult != VK_SUCCESS) {
-      VkFence fence = swapchain->getInFlightFence(currentFrameIndex);
-      vkResetFences(device->getLogicalDevice(), 1, &fence);
       return;
     }
 
@@ -350,6 +360,7 @@ public:
     m_drawUiCallback = std::move(cb);
   }
 
+  WindowPtr m_window;
   VulkanDevicePtr device = nullptr;
   VulkanResourceManagerPtr resourceManager = nullptr;
   VulkanSwapchainPtr swapchain = nullptr;
@@ -364,6 +375,11 @@ public:
 
 private:
   void rebuildSwapchain() {
+    // A zero-sized window (minimized, or mid-drag) produces an invalid
+    // swapchain. Let draw() retry later when the window has real size.
+    if (m_window && (m_window->getWidth() <= 0 || m_window->getHeight() <= 0)) {
+      return;
+    }
     swapchain->waitIdle();
     swapchain->rebuild(resourceManager->getRenderPass());
     m_gui.updateSwapchainImageCount(swapchain->getImageCount());

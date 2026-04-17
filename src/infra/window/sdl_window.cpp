@@ -111,8 +111,26 @@ Window::Window(const char *title, int width, int height)
     : pImpl(new Impl(title, width, height)) {}
 
 Window::~Window() { delete pImpl; }
-int Window::getWidth() const { return pImpl->width; }
-int Window::getHeight() const { return pImpl->height; }
+// getWidth/getHeight query SDL for the live pixel size each call so swapchain
+// rebuild after a resize sees the new extent, not the construction-time value.
+// SDL_GetWindowSizeInPixels is a cheap local lookup; the per-frame cost is
+// negligible.
+int Window::getWidth() const {
+  int w = pImpl->width;
+  int h = pImpl->height;
+  SDL_GetWindowSizeInPixels(pImpl->window, &w, &h);
+  pImpl->width = w;
+  pImpl->height = h;
+  return w;
+}
+int Window::getHeight() const {
+  int w = pImpl->width;
+  int h = pImpl->height;
+  SDL_GetWindowSizeInPixels(pImpl->window, &w, &h);
+  pImpl->width = w;
+  pImpl->height = h;
+  return h;
+}
 bool Window::shouldClose() {
   bool result = pImpl->shouldClose();
   if (result && pImpl->closeCallback) {

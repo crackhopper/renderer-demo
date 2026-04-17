@@ -67,8 +67,8 @@ int main() {
     scene->addRenderable(ground);
 
     auto camera = scene->getCameras().front();
-    camera->position = LX_core::Vec3f{2.0f, 1.2f, 2.5f};
-    camera->target = LX_core::Vec3f{0.0f, 0.5f, 0.0f};
+    camera->position = LX_core::Vec3f{2.5f, 1.5f, 3.0f};
+    camera->target = LX_core::Vec3f{0.0f, 0.0f, 0.0f};
     camera->up = LX_core::Vec3f{0.0f, 1.0f, 0.0f};
     camera->aspect = static_cast<float>(kWindowWidth)
                      / static_cast<float>(kWindowHeight);

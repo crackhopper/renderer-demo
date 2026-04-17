@@ -9,7 +9,7 @@ Restart the local notes site after editing documentation. This command regenerat
 
 **Input**: No arguments required. Run `/refresh-notes` after any doc change that should appear in the notes site.
 
-This command is now a compatibility wrapper around `scripts/serve-notes.sh`.
+This command runs `scripts/serve-notes.sh`, which regenerates `mkdocs.gen.yml`, stops the old listener on the notes port, and starts a fresh background `mkdocs serve`.
 
 ## When To Use
 
@@ -24,8 +24,12 @@ This command is now a compatibility wrapper around `scripts/serve-notes.sh`.
 1. Run:
 
 ```bash
-scripts/refresh-notes.sh
+scripts/serve-notes.sh
 ```
+
+The script is idempotent — if an old `mkdocs serve` is already bound to the
+notes port, it is stopped first before the new one starts. No separate
+`refresh-notes.sh` helper exists; do not invent one.
 
 2. Confirm that:
 

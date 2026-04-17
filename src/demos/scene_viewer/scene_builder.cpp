@@ -188,7 +188,12 @@ MaterialInstancePtr makeGroundMaterial() {
 }
 
 MeshPtr buildGroundMesh() {
-  const float half = 10.0f; // 20m x 20m
+  const float half = 20.0f; // 40m x 40m — wide enough to give visual context
+  // Ground drops below the helmet's local origin so the helmet sits clearly
+  // above the plane. DamagedHelmet is roughly 2m tall centered near y=0 in
+  // mesh space; we don't yet apply glTF node transforms, so hand-tune the
+  // ground height here.
+  const float groundY = -1.5f;
   const Vec3f up{0.0f, 1.0f, 0.0f};
   const Vec4f tangent{1.0f, 0.0f, 0.0f, 1.0f};
   const Vec4i zeroBones{0, 0, 0, 0};
@@ -196,14 +201,14 @@ MeshPtr buildGroundMesh() {
 
   std::vector<VertexPosNormalUvBone> verts;
   verts.reserve(4);
-  verts.emplace_back(Vec3f{-half, 0.0f, -half}, up, Vec2f{0.0f, 0.0f},
+  verts.emplace_back(Vec3f{-half, groundY, -half}, up, Vec2f{0.0f, 0.0f},
                      tangent, zeroBones, zeroWeights);
-  verts.emplace_back(Vec3f{half, 0.0f, -half}, up, Vec2f{1.0f, 0.0f}, tangent,
-                     zeroBones, zeroWeights);
-  verts.emplace_back(Vec3f{half, 0.0f, half}, up, Vec2f{1.0f, 1.0f}, tangent,
-                     zeroBones, zeroWeights);
-  verts.emplace_back(Vec3f{-half, 0.0f, half}, up, Vec2f{0.0f, 1.0f}, tangent,
-                     zeroBones, zeroWeights);
+  verts.emplace_back(Vec3f{half, groundY, -half}, up, Vec2f{1.0f, 0.0f},
+                     tangent, zeroBones, zeroWeights);
+  verts.emplace_back(Vec3f{half, groundY, half}, up, Vec2f{1.0f, 1.0f},
+                     tangent, zeroBones, zeroWeights);
+  verts.emplace_back(Vec3f{-half, groundY, half}, up, Vec2f{0.0f, 1.0f},
+                     tangent, zeroBones, zeroWeights);
 
   auto vb = VertexBuffer<VertexPosNormalUvBone>::create(std::move(verts));
   auto ib = IndexBuffer::create(
